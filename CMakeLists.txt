@@ -26,6 +26,14 @@ if(ACID_BUILD_PLUGIN)
         URL https://github.com/juce-framework/JUCE/archive/refs/tags/8.0.4.tar.gz)
     FetchContent_MakeAvailable(JUCE)
 
+    # On Windows the VST3 folder needs admin rights, so the build leaves the plugin in
+    # build/TB303_DevilAcid_artefacts/Release/VST3 for you to copy instead
+    if(WIN32)
+        set(ACID_COPY_AFTER_BUILD FALSE)
+    else()
+        set(ACID_COPY_AFTER_BUILD TRUE)
+    endif()
+
     juce_add_plugin(TB303_DevilAcid
         COMPANY_NAME "DevilAcidAudio"
         BUNDLE_ID com.devilacidaudio.tb303devilacid
@@ -34,7 +42,7 @@ if(ACID_BUILD_PLUGIN)
         NEEDS_MIDI_OUTPUT FALSE
         IS_MIDI_EFFECT FALSE
         EDITOR_WANTS_KEYBOARD_FOCUS FALSE
-        COPY_PLUGIN_AFTER_BUILD TRUE        # installs the VST3 into ~/.vst3
+        COPY_PLUGIN_AFTER_BUILD ${ACID_COPY_AFTER_BUILD}   # Linux: installs the VST3 into ~/.vst3
         PLUGIN_MANUFACTURER_CODE Dvac
         PLUGIN_CODE T303
         VST3_CATEGORIES Instrument Synth
