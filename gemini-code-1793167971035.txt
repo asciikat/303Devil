@@ -1,0 +1,597 @@
+desc:TB-303 Acid Bassline + 16-Step Acid Sequencer + Devil Fish
+// tags: instrument synthesizer bass acid 303 techno sequencer
+// author: Custom JSFX DSP + Step Sequencer
+
+slider1:0<0,1,1{Sawtooth,Square (303 Hollow)}>-Waveform
+slider2:0<-24,24,1>-Tuning (Semitones)
+slider3:35<0,100,0.1>-Cutoff Frequency (%)
+slider4:75<0,100,0.1>-Resonance (%)
+slider5:65<0,100,0.1>-Env Mod (%)
+slider6:45<0,100,0.1>-Decay (%)
+slider7:70<0,100,0.1>-Accent Amount (%)
+slider8:60<10,200,1>-Slide Time (ms)
+slider9:100<1,127,1>-Accent Velocity Threshold
+slider10:1<0,1,1{Authentic 303,FULL ACID TECHNO}>-Acid Mode
+slider11:55<0,100,0.1>-Acid Drive / Distortion (%)
+slider12:130<60,180,1>-Internal BPM
+slider13:1<0,1,1{Internal Sequencer,External MIDI}>-Sequencer Source
+slider14:-6<-24,12,0.1>-Output Level (dB)
+
+@init
+pi = $pi;
+twopi = 2.0 * pi;
+phase = 0;
+current_note = -1;
+gate = 0;
+target_freq = 110;
+curr_freq = 110;
+vel = 0;
+is_accent = 0;
+is_slide = 0;
+
+// Filter & DSP states
+s1 = s2 = s3 = s4 = 0;
+dc_x1 = dc_y1 = 0;
+sub_lp = 0;
+hp_fb = 0;
+
+// Envelope states
+vca_env = 0;
+vcf_env = 0;
+acc_cap = 0;
+
+// Oscilloscope buffer
+scope_buf = 2000;
+scope_idx = 0;
+scope_len = 512;
+
+// Sequencer Memory Arrays (16 Steps)
+// Note offsets relative to root (semitones: e.g. 0=Root, 3=Minor 3rd, 5=4th, 7=5th, 10=Minor 7th, 12=Octave)
+seq_note = 4000;  // 16 slots
+seq_gate = 4020;  // 16 slots (0=Off, 1=On)
+seq_slide = 4040; // 16 slots (0=Normal, 1=Slide)
+seq_acc = 4060;   // 16 slots (0=Normal, 1=Accent)
+
+current_step = 0;
+seq_timer = 0;
+playing_seq = 0;
+
+// Initialize default acid pattern if empty
+seq_gate[0]=1; seq_note[0]=0;  seq_acc[0]=1; seq_slide[0]=0;
+seq_gate[1]=1; seq_note[1]=12; seq_acc[1]=0; seq_slide[1]=1;
+seq_gate[2]=1; seq_note[2]=3;  seq_acc[2]=0; seq_slide[2]=0;
+seq_gate[3]=0; seq_note[3]=7;  seq_acc[3]=0; seq_slide[3]=0;
+seq_gate[4]=1; seq_note[4]=-2; seq_acc[4]=1; seq_slide[4]=0;
+seq_gate[5]=1; seq_note[5]=5;  seq_acc[5]=0; seq_slide[5]=1;
+seq_gate[6]=1; seq_note[6]=7;  seq_acc[6]=0; seq_slide[6]=0;
+seq_gate[7]=0; seq_note[7]=0;  seq_acc[7]=0; seq_slide[7]=0;
+seq_gate[8]=1; seq_note[8]=0;  seq_acc[8]=1; seq_slide[8]=0;
+seq_gate[9]=1; seq_note[9]=10; seq_acc[9]=0; seq_slide[9]=1;
+seq_gate[10]=1; seq_note[10]=3; seq_acc[10]=0; seq_slide[10]=0;
+seq_gate[11]=0; seq_note[11]=5; seq_acc[11]=0; seq_slide[11]=0;
+seq_gate[12]=1; seq_note[12]=12;seq_acc[12]=1; seq_slide[12]=0;
+seq_gate[13]=1; seq_note[13]=7; seq_acc[13]=0; seq_slide[13]=1;
+seq_gate[14]=1; seq_note[14]=3; seq_acc[14]=0; seq_slide[14]=0;
+seq_gate[15]=0; seq_note[15]=0; seq_acc[15]=0; seq_slide[15]=0;
+
+root_midi = 38; // D1 root note
+
+// UI Interaction state
+active_knob = -1;
+drag_y = 0;
+drag_val = 0;
+last_click_time = 0;
+
+function tanh_approx(x) local(x2) (
+  x = max(-3.0, min(3.0, x));
+  x2 = x * x;
+  x * (27.0 + x2) / (27.0 + 9.0 * x2);
+);
+
+function poly_blep(t, dt) (
+  t < dt ? (
+    t /= dt;
+    t + t - t * t - 1.0;
+  ) : t > (1.0 - dt) ? (
+    t = (t - 1.0) / dt;
+    t * t + t + t + 1.0;
+  ) : 0.0;
+);
+
+function randomize_acid_pattern() local(i, r) (
+  i = 0;
+  loop(16,
+    seq_gate[i] = (rand(1.0) > 0.3) ? 1 : 0;
+    r = rand(5.0);
+    r < 1 ? seq_note[i] = 0 :
+    r < 2 ? seq_note[i] = 3 :
+    r < 3 ? seq_note[i] = 5 :
+    r < 4 ? seq_note[i] = 7 :
+    r < 4.5 ? seq_note[i] = 10 : seq_note[i] = 12;
+    
+    seq_acc[i] = (rand(1.0) > 0.6) ? 1 : 0;
+    seq_slide[i] = (rand(1.0) > 0.5) ? 1 : 0;
+    i += 1;
+  );
+);
+
+function update_dsp_params() (
+  wave = slider1;
+  tune_Multiplier = 2 ^ (slider2 / 12.0);
+  cutoff_norm = slider3 * 0.01;
+  base_cutoff = 28.0 * (160.0 ^ (cutoff_norm ^ 1.2));
+  res_norm = slider4 * 0.01;
+  env_mod = slider5 * 0.01;
+  decay_norm = slider6 * 0.01;
+  accent_amt = slider7 * 0.01;
+  slide_ms = slider8;
+  acc_thresh = slider9;
+  acid_mode = slider10;
+  drive_norm = slider11 * 0.01;
+  bpm = slider12;
+  seq_source = slider13;
+  out_gain = 10 ^ (slider14 / 20.0);
+
+  slide_coeff = exp(-1000.0 / (slide_ms * srate));
+  decay_ms = 200.0 + (decay_norm ^ 2.0) * 2300.0;
+  vcf_decay_normal = exp(-1000.0 / (decay_ms * srate));
+  vcf_decay_accent = exp(-1000.0 / (210.0 * srate));
+
+  vca_att = exp(-1000.0 / (1.5 * srate));
+  vca_rel = exp(-1000.0 / (18.0 * srate));
+  vca_hold_decay = exp(-1000.0 / (3500.0 * srate));
+
+  acc_cap_att = exp(-1000.0 / (12.0 * srate));
+  acc_cap_rel = acid_mode ? exp(-1000.0 / (140.0 * srate)) : exp(-1000.0 / (85.0 * srate));
+  
+  step_samples = (60.0 / bpm) * 0.25 * srate; // 16th notes
+);
+
+@slider
+update_dsp_params();
+
+@block
+update_dsp_params();
+
+// Handle External MIDI if Sequencer is set to External
+seq_source == 1 ? (
+  while (midirecv(offset, msg1, msg2, msg3)) (
+    status = msg1 & 0xF0;
+    status == 0x90 && msg3 > 0 ? (
+      note = msg2; vel = msg3;
+      gate > 0 ? (is_slide = 1;) : (is_slide = 0; vcf_env = 1.0;);
+      current_note = note; gate = 1;
+      target_freq = 440.0 * (2.0 ^ ((note - 69.0) / 12.0)) * tune_Multiplier;
+      !is_slide ? curr_freq = target_freq;
+      vel >= acc_thresh ? (is_accent = 1; acc_cap = min(1.8, acc_cap + (acid_mode ? 0.85 : 0.65));) : (is_accent = 0;);
+    ) : (status == 0x80 || (status == 0x90 && msg3 == 0)) ? (
+      msg2 == current_note ? (gate = 0; is_slide = 0;);
+    ) : (
+      midisend(offset, msg1, msg2, msg3);
+    );
+  );
+) : (
+  // Clear any incoming MIDI if internal sequencer is active
+  while (midirecv(offset, msg1, msg2, msg3)) ( );
+  
+  // Internal Step Sequencer Clock (plays on transport play or test mode)
+  play_state & 1 ? (
+    playing_seq = 1;
+    samples_per_block = blocksample;
+    seq_timer += samples_per_block;
+    
+    seq_timer >= step_samples ? (
+      seq_timer -= step_samples;
+      
+      // Trigger Step
+      active_gate = seq_gate[current_step];
+      active_note_offset = seq_note[current_step];
+      active_slide = seq_slide[current_step];
+      active_acc = seq_acc[current_step];
+      
+      active_gate ? (
+        note = root_midi + active_note_offset;
+        active_slide ? (
+          is_slide = 1;
+        ) : (
+          is_slide = 0;
+          vcf_env = 1.0;
+        );
+        current_note = note;
+        gate = 1;
+        target_freq = 440.0 * (2.0 ^ ((note - 69.0) / 12.0)) * tune_Multiplier;
+        !is_slide ? curr_freq = target_freq;
+        
+        active_acc ? (
+          is_accent = 1;
+          acc_cap = min(1.8, acc_cap + (acid_mode ? 0.85 : 0.65));
+        ) : (
+          is_accent = 0;
+        );
+      ) : (
+        gate = 0;
+        is_slide = 0;
+      );
+      
+      current_step = (current_step + 1) % 16;
+    );
+  ) : (
+    playing_seq = 0;
+  );
+);
+
+@sample
+is_slide ? (
+  curr_freq = target_freq + slide_coeff * (curr_freq - target_freq);
+) : (
+  curr_freq = target_freq;
+);
+
+gate ? (
+  vca_target = is_accent ? (1.0 + accent_amt * 0.45) : 0.75;
+  vca_env = vca_target + vca_att * (vca_env - vca_target);
+  vca_env *= vca_hold_decay;
+) : (
+  vca_env *= vca_rel;
+);
+
+current_vcf_decay = is_accent ? vcf_decay_accent : vcf_decay_normal;
+vcf_env *= current_vcf_decay;
+acc_cap *= acc_cap_rel;
+
+dt = curr_freq / srate;
+phase += dt;
+phase >= 1.0 ? phase -= 1.0;
+
+saw = 2.0 * phase - 1.0;
+saw -= poly_blep(phase, dt);
+
+wave == 0 ? (
+  osc = saw;
+) : (
+  pw = 0.54;
+  sq = phase < pw ? 1.0 : -1.0;
+  sq += poly_blep(phase, dt);
+  sq -= poly_blep(phase - pw + (phase < pw ? 1.0 : 0.0), dt);
+  osc = sq * 0.82 - saw * 0.18;
+);
+
+env_Factor = vcf_env * (1.0 + env_mod * (acid_mode ? 7.5 : 5.5));
+acc_Sweep = acc_cap * accent_amt * (acid_mode ? 4.5 : 2.8);
+
+mod_cutoff = base_cutoff * (1.0 + env_Factor + acc_Sweep);
+mod_cutoff = min(srate * 0.44, max(25.0, mod_cutoff));
+
+wc = twopi * mod_cutoff / srate;
+g = wc / (1.0 + wc);
+
+k_res = (res_norm ^ 0.85) * (acid_mode ? 4.15 : 3.85);
+is_accent ? k_res = min(4.3, k_res + accent_amt * 0.25);
+
+fb_signal = s4 - hp_fb;
+hp_fb += 0.008 * fb_signal;
+
+input_sig = osc - k_res * tanh_approx(fb_signal * (acid_mode ? 1.4 : 1.0));
+input_sig = tanh_approx(input_sig);
+
+s1 += g * (input_sig - s1);
+s2 += g * (s1 - s2);
+s3 += g * (s2 - s3);
+s4 += g * (s3 - s4);
+
+flt_out = s4;
+sig = flt_out * vca_env;
+
+acid_mode ? (
+  sub_lp += 0.015 * (sig - sub_lp);
+  drive_gain = 1.0 + (drive_norm ^ 1.5) * 14.0;
+  driven = sig * drive_gain;
+  driven >= 0 ? (
+    clipped = tanh_approx(driven * 1.35);
+  ) : (
+    clipped = tanh_approx(driven * 0.9) * 1.1;
+  );
+  sig = clipped * 0.85 + sub_lp * (0.6 + drive_norm * 0.8);
+);
+
+dc_out = sig - dc_x1 + 0.995 * dc_y1;
+dc_x1 = sig;
+dc_y1 = dc_out;
+
+final_out = dc_out * out_gain;
+
+scope_buf[scope_idx] = final_out;
+scope_idx = (scope_idx + 1) % scope_len;
+
+spl0 = final_out;
+spl1 = final_out;
+
+// ==========================================================
+// CUSTOM HARDWARE GUI & 16-STEP SEQUENCER (@gfx)
+// ==========================================================
+@gfx 720 600
+
+function draw_knob(id, x, y, r, val, min_v, max_v, def_v, step_v, label, unit_str)
+  local(norm, ang, start_ang, end_ang, px, py, i, tick_ang, tx1, ty1, tx2, ty2, dist, sensitivity, str_val)
+(
+  (mouse_cap & 1) ? (
+    active_knob == -1 ? (
+      dist = sqrt((mouse_x - x)^2 + (mouse_y - y)^2);
+      dist <= r + 6 ? (
+        time_precise() - last_click_time < 0.25 ? (
+          val = def_v;
+          active_knob = -2;
+        ) : (
+          active_knob = id;
+          drag_y = mouse_y;
+          drag_val = val;
+        );
+        last_click_time = time_precise();
+      );
+    ) : active_knob == id ? (
+      sensitivity = (mouse_cap & 8) ? 600.0 : 140.0;
+      val = drag_val + ((drag_y - mouse_y) / sensitivity) * (max_v - min_v);
+      val = max(min_v, min(max_v, val));
+      step_v >= 1 ? val = floor(val + 0.5);
+      slider_automate(2^(id-1));
+    );
+  ) : (
+    active_knob = -1;
+  );
+
+  norm = (val - min_v) / (max_v - min_v);
+  start_ang = -0.75 * pi;
+  end_ang = 0.75 * pi;
+  ang = start_ang + norm * (end_ang - start_ang);
+
+  i = 0;
+  loop(11,
+    tick_ang = start_ang + (i / 10.0) * (end_ang - start_ang) - pi*0.5;
+    tx1 = x + cos(tick_ang) * (r + 4);
+    ty1 = y + sin(tick_ang) * (r + 4);
+    tx2 = x + cos(tick_ang) * (r + 9);
+    ty2 = y + sin(tick_ang) * (r + 9);
+    acid_mode ? gfx_set(0.95, 0.85, 0.1, 0.7) : gfx_set(0.15, 0.15, 0.18, 0.85);
+    gfx_line(tx1, ty1, tx2, ty2);
+    i += 1;
+  );
+
+  gfx_set(0.05, 0.05, 0.06, 0.6);
+  gfx_circle(x + 2, y + 3, r, 1);
+  gfx_set(0.14, 0.14, 0.16, 1.0);
+  gfx_circle(x, y, r, 1);
+
+  acid_mode ? gfx_set(0.22, 0.22, 0.25, 1.0) : gfx_set(0.28, 0.29, 0.32, 1.0);
+  gfx_circle(x, y, r * 0.78, 1);
+
+  px = x + cos(ang - pi*0.5) * (r * 0.82);
+  py = y + sin(ang - pi*0.5) * (r * 0.82);
+  acid_mode ? gfx_set(1.0, 0.9, 0.0, 1.0) : gfx_set(1.0, 0.25, 0.15, 1.0);
+  gfx_line(x, y, px, py);
+
+  gfx_setfont(1, "Arial", 11, 'b');
+  acid_mode ? gfx_set(0.95, 0.9, 0.2, 1.0) : gfx_set(0.12, 0.12, 0.15, 1.0);
+  gfx_measurestr(label, tw, th);
+  gfx_x = x - tw * 0.5; gfx_y = y - r - 22;
+  gfx_drawstr(label);
+
+  gfx_setfont(1, "Courier New", 11, 'b');
+  acid_mode ? gfx_set(0.4, 1.0, 0.3, 0.9) : gfx_set(0.2, 0.2, 0.25, 0.9);
+  step_v >= 1 ? sprintf(#str_val, "%d%s", val, unit_str) : sprintf(#str_val, "%.1f%s", val, unit_str);
+  gfx_measurestr(#str_val, tw, th);
+  gfx_x = x - tw * 0.5; gfx_y = y + r + 8;
+  gfx_drawstr(#str_val);
+
+  val;
+);
+
+// 1. CHASSIS BACKGROUND
+acid_mode = slider10;
+acid_mode ? (
+  gfx_set(0.09, 0.09, 0.11, 1.0);
+  gfx_rect(0, 0, 720, 600);
+  gfx_set(0.95, 0.82, 0.05, 1.0);
+  gfx_rect(10, 10, 700, 580, 0);
+) : (
+  gfx_set(0.76, 0.78, 0.80, 1.0);
+  gfx_rect(0, 0, 720, 600);
+  gfx_set(0.25, 0.26, 0.28, 1.0);
+  gfx_rect(10, 10, 700, 580, 0);
+);
+
+// 2. HEADER BAR
+acid_mode ? gfx_set(0.95, 0.82, 0.05, 1.0) : gfx_set(0.18, 0.19, 0.22, 1.0);
+gfx_rect(20, 20, 680, 40);
+
+gfx_setfont(1, "Arial", 18, 'b');
+acid_mode ? gfx_set(0.08, 0.08, 0.1, 1.0) : gfx_set(0.92, 0.92, 0.94, 1.0);
+gfx_x = 28; gfx_y = 31;
+gfx_drawstr("TB-303 // DEVIL ACID RIG + 16-STEP SEQUENCER");
+
+// Waveform Button
+wx = 535; wy = 25; ww = 155; wh = 30;
+gfx_set(0.12, 0.12, 0.14, 1.0);
+gfx_rect(wx, wy, ww, wh);
+gfx_setfont(1, "Arial", 11, 'b');
+slider1 == 0 ? (
+  gfx_set(1.0, 0.4, 0.2, 1.0); gfx_x = wx + 12; gfx_y = wy + 9; gfx_drawstr("WAVE: SAWTOOTH");
+) : (
+  gfx_set(0.3, 0.9, 1.0, 1.0); gfx_x = wx + 10; gfx_y = wy + 9; gfx_drawstr("WAVE: 303 SQUARE");
+);
+
+(mouse_cap & 1) && !(last_mouse_cap & 1) ? (
+  mouse_x >= wx && mouse_x <= wx+ww && mouse_y >= wy && mouse_y <= wy+wh ? (
+    slider1 = 1 - slider1; slider_automate(1); update_dsp_params();
+  );
+);
+
+// 3. SYNTH KNOBS (TOP ROW)
+slider2 = draw_knob(2, 72,  132, 24, slider2, -24, 24, 0,  1,   "TUNING",    " st");
+slider3 = draw_knob(3, 180, 132, 24, slider3, 0,   100, 35, 0.1, "CUTOFF",    "%");
+slider4 = draw_knob(4, 288, 132, 24, slider4, 0,   100, 75, 0.1, "RESONANCE", "%");
+slider5 = draw_knob(5, 396, 132, 24, slider5, 0,   100, 65, 0.1, "ENV MOD",   "%");
+slider6 = draw_knob(6, 504, 132, 24, slider6, 0,   100, 45, 0.1, "DECAY",     "%");
+slider7 = draw_knob(7, 612, 132, 24, slider7, 0,   100, 70, 0.1, "ACCENT",    "%");
+
+// 4. SECOND ROW CONTROLS
+slider8  = draw_knob(8,  72,  222, 22, slider8,  10,  200, 60,  1,   "SLIDE TIME", "ms");
+slider9  = draw_knob(9,  175, 222, 22, slider9,  1,   127, 100, 1,   "ACC VEL >=", "");
+slider11 = draw_knob(11, 278, 222, 22, slider11, 0,   100, 55,  0.1, "ACID DRIVE", "%");
+slider12 = draw_knob(12, 381, 222, 22, slider12, 60,  180, 130, 1,   "INTERNAL BPM", "");
+
+// Acid Mode Toggle Button
+bx = 450; by = 196; bw = 240; bh = 52;
+acid_mode ? (
+  gfx_set(0.95, 0.80, 0.05, 1.0); gfx_rect(bx, by, bw, bh);
+  gfx_set(1.0, 0.2, 0.1, 1.0); gfx_rect(bx+2, by+2, bw-4, bh-4, 0);
+  gfx_setfont(1, "Arial", 14, 'b'); gfx_set(0.08, 0.08, 0.08, 1.0);
+  gfx_x = bx + 22; gfx_y = by + 18; gfx_drawstr("FULL ACID TECHNO: ON");
+) : (
+  gfx_set(0.20, 0.21, 0.24, 1.0); gfx_rect(bx, by, bw, bh);
+  gfx_setfont(1, "Arial", 13, 'b'); gfx_set(0.85, 0.85, 0.88, 1.0);
+  gfx_x = bx + 26; gfx_y = by + 18; gfx_drawstr("ENGAGE ACID TECHNO");
+);
+
+(mouse_cap & 1) && !(last_mouse_cap & 1) ? (
+  mouse_x >= bx && mouse_x <= bx+bw && mouse_y >= by && mouse_y <= by+bh ? (
+    slider10 = 1 - slider10; slider_automate(2^9); update_dsp_params();
+  );
+);
+
+// 5. 16-STEP ROLAND-STYLE ACID SEQUENCER MATRIX
+seq_y = 270;
+gfx_set(0.12, 0.13, 0.15, 1.0);
+gfx_rect(20, seq_y, 680, 310);
+gfx_set(0.3, 0.35, 0.4, 1.0);
+gfx_rect(20, seq_y, 680, 310, 0);
+
+gfx_setfont(1, "Arial", 14, 'b');
+acid_mode ? gfx_set(0.95, 0.85, 0.1, 1.0) : gfx_set(0.9, 0.9, 0.9, 1.0);
+gfx_x = 32; gfx_y = seq_y + 12;
+gfx_drawstr("ROLAN-STYLE 16-STEP ACID MATRIX");
+
+// Randomize Acid Button
+rbx = 520; rby = seq_y + 8; rbw = 168; rbh = 26;
+gfx_set(0.8, 0.3, 0.1, 1.0);
+gfx_rect(rbx, rby, rbw, rbh);
+gfx_setfont(1, "Arial", 12, 'b');
+gfx_set(1, 1, 1, 1);
+gfx_x = rbx + 26; gfx_y = rby + 7;
+gfx_drawstr("[⚡ RANDOM ACID]");
+
+(mouse_cap & 1) && !(last_mouse_cap & 1) ? (
+  mouse_x >= rbx && mouse_x <= rbx+rbw && mouse_y >= rby && mouse_y <= rby+rbh ? (
+    randomize_acid_pattern();
+  );
+);
+
+// Draw 16 Steps
+step_w = 39;
+step_start_x = 28;
+s_top = seq_y + 45;
+
+i = 0;
+loop(16,
+  sx_pos = step_start_x + i * step_w;
+  
+  // Highlight currently playing step
+  playing_seq && (current_step == i) ? (
+    gfx_set(0.9, 0.8, 0.1, 0.35);
+    gfx_rect(sx_pos, s_top, step_w - 4, 245, 1);
+  );
+
+  // Step Number Header
+  gfx_setfont(1, "Arial", 11, 'b');
+  acid_mode ? gfx_set(0.9, 0.85, 0.1, 1.0) : gfx_set(0.7, 0.7, 0.7, 1.0);
+  sprintf(#s_num, "%2d", i + 1);
+  gfx_measurestr(#s_num, tw, th);
+  gfx_x = sx_pos + (step_w - 4 - tw) * 0.5; gfx_y = s_top + 4;
+  gfx_drawstr(#s_num);
+
+  // GATE ROW (On/Off)
+  gy = s_top + 28;
+  gw = step_w - 6; gh = 28;
+  seq_gate[i] ? (
+    acid_mode ? gfx_set(0.2, 0.9, 0.3, 1.0) : gfx_set(0.2, 0.7, 0.9, 1.0);
+  ) : (
+    gfx_set(0.18, 0.19, 0.22, 1.0);
+  );
+  gfx_rect(sx_pos, gy, gw, gh);
+  gfx_setfont(1, "Arial", 10, 'b');
+  gfx_set(0,0,0,1);
+  seq_gate[i] ? gfx_drawstr("ON") : gfx_drawstr("--");
+
+  // NOTE TRANSPOSITION ROW (-2 to +12 semitones)
+  ny = gy + 34;
+  nh = 32;
+  gfx_set(0.22, 0.23, 0.26, 1.0);
+  gfx_rect(sx_pos, ny, gw, nh);
+  gfx_setfont(1, "Courier New", 11, 'b');
+  gfx_set(0.9, 0.9, 0.9, 1.0);
+  sprintf(#n_str, "%+d", seq_note[i]);
+  gfx_measurestr(#n_str, tw, th);
+  gfx_x = sx_pos + (gw - tw) * 0.5; gfx_y = ny + 10;
+  gfx_drawstr(#n_str);
+
+  // ACCENT ROW
+  acy = ny + 38;
+  ach = 26;
+  seq_acc[i] ? gfx_set(1.0, 0.3, 0.1, 1.0) : gfx_set(0.18, 0.19, 0.22, 1.0);
+  gfx_rect(sx_pos, acy, gw, ach);
+  gfx_setfont(1, "Arial", 10, 'b');
+  gfx_set(1,1,1,1);
+  gfx_x = sx_pos + 6; gfx_y = acy + 7;
+  gfx_drawstr("ACC");
+
+  // SLIDE ROW
+  sly = acy + 32;
+  slh = 26;
+  seq_slide[i] ? gfx_set(0.9, 0.8, 0.1, 1.0) : gfx_set(0.18, 0.19, 0.22, 1.0);
+  gfx_rect(sx_pos, sly, gw, slh);
+  gfx_setfont(1, "Arial", 10, 'b');
+  seq_slide[i] ? gfx_set(0,0,0,1) : gfx_set(0.6,0.6,0.6,1);
+  gfx_x = sx_pos + 6; gfx_y = sly + 7;
+  gfx_drawstr("SLD");
+
+  // Mouse Clicks on Sequencer Grid
+  (mouse_cap & 1) && !(last_mouse_cap & 1) ? (
+    mx = mouse_x; my = mouse_y;
+    mx >= sx_pos && mx <= sx_pos + gw ? (
+      // Gate click
+      my >= gy && my <= gy + gh ? ( seq_gate[i] = 1 - seq_gate[i]; );
+      // Note click (drag up/down or click to cycle notes)
+      my >= ny && my <= ny + nh ? ( 
+        seq_note[i] += 2;
+        seq_note[i] > 12 ? seq_note[i] = -2;
+      );
+      // Accent click
+      my >= acy && my <= acy + ach ? ( seq_acc[i] = 1 - seq_acc[i]; );
+      // Slide click
+      my >= sly && my <= sly + slh ? ( seq_slide[i] = 1 - seq_slide[i]; );
+    );
+  );
+
+  i += 1;
+);
+
+// 6. MINI OSCILLOSCOPE AT BOTTOM RIGHT
+osc_x = 450; osc_y = 485; osc_w = 245; osc_h = 88;
+gfx_set(0.04, 0.05, 0.06, 1.0);
+gfx_rect(osc_x, osc_y, osc_w, osc_h);
+acid_mode ? gfx_set(1.0, 0.9, 0.1, 1.0) : gfx_set(0.2, 0.95, 0.4, 1.0);
+
+i = 0;
+last_px = osc_x;
+last_py = osc_y + osc_h * 0.5;
+while (i < osc_w - 2) (
+  buf_pos = (scope_idx + floor(i * (scope_len / osc_w))) % scope_len;
+  samp = max(-1.0, min(1.0, scope_buf[buf_pos]));
+  px = osc_x + i + 1;
+  py = (osc_y + osc_h * 0.5) - (samp * (osc_h * 0.42));
+  i > 0 ? gfx_line(last_px, last_py, px, py);
+  last_px = px; last_py = py;
+  i += 1;
+);
+
+last_mouse_cap = mouse_cap;
+update_dsp_params();
