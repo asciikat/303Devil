@@ -146,7 +146,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TB303AcidProcessor::createPa
     // Main-stage FX
     addPercent (pid::delayMix, "Delay Mix", 0.0f);
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { pid::delayTime, 1 }, "Delay Time",
-                                                        StringArray (kDelayTimeNames), 2));
+                                                        StringArray (kDelayTimeNames, (int) std::size (kDelayTimeNames)), 2));
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { pid::delayFeedback, 1 }, "Delay Feedback", NormalisableRange<float> (0.0f, 0.9f), 0.45f,
         AudioParameterFloatAttributes().withStringFromValueFunction (percentText).withValueFromStringFunction (percentValue)));
@@ -155,13 +155,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout TB303AcidProcessor::createPa
     addPercent (pid::pump,       "Pump",        0.0f);
     addPercent (pid::lfoDepth,   "Filter LFO Depth", 0.0f);
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { pid::lfoRate, 1 }, "Filter LFO Rate",
-                                                        StringArray (kLfoRateNames), 4));
+                                                        StringArray (kLfoRateNames, (int) std::size (kLfoRateNames)), 4));
 
     // Cheat panel
     addPercent (pid::squelch, "Squelch", 0.0f);
     addPercent (pid::tweak,   "Auto Tweak", 0.0f);
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { pid::tweakRate, 1 }, "Auto Tweak Rate",
-                                                        StringArray (kTweakRateNames), 1));
+                                                        StringArray (kTweakRateNames, (int) std::size (kTweakRateNames)), 1));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { pid::style, 1 }, "Generator Style",
                                                         StringArray { "Classic", "Hard", "Hypnotic", "Minimal", "Dark", "Rave" }, 0));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { pid::scale, 1 }, "Scale Lock",
@@ -544,7 +544,7 @@ bool TB303AcidProcessor::restoreGhostTree (const juce::ValueTree& ghostTree)
                           (float) juce::ByteOrder::swapIfBigEndian (in[i]) / 65535.0f);
             const juce::String flags = ghostTree.getProperty ("flags").toString();
             for (int b = 0; b < bars * acid::ghost::kBeatsPerBar; ++b)
-                take.setBeatFlags (b, b < flags.length() ? juce::jlimit (0, 3, flags[b] - '0') : 0);
+                take.setBeatFlags (b, b < flags.length() ? juce::jlimit (0, 3, (int) flags[b] - '0') : 0);
             const int phase = juce::jlimit (0, juce::jmax (0, bars - 1), (int) ghostTree.getProperty ("phase", 0));
             take.commit (bars, phase, (int) ghostTree.getProperty ("phrase", phase));
             loaded = bars > 0;

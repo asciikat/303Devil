@@ -14,6 +14,10 @@
 #include <sys/stat.h>
 #include <vector>
 
+#ifdef _WIN32
+ #include <direct.h>
+#endif
+
 namespace
 {
 constexpr int kSampleRate = 44100;
@@ -554,7 +558,11 @@ std::vector<float> renderEnergyArc()
 int main (int argc, char** argv)
 {
     const std::string dir = argc > 1 ? argv[1] : "renders";
+   #ifdef _WIN32
+    _mkdir (dir.c_str());
+   #else
     mkdir (dir.c_str(), 0755);
+   #endif
 
     checkLadder();
 
