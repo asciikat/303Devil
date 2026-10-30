@@ -315,6 +315,9 @@ private:
 // The order ROLE Arp plays a chord's notes in. Jump plays each note, then the same note an octave up.
 enum class ArpMode { up, down, upDown, random, jump };
 
+// How fast ROLE Arp moves through the chord: 1/8, 1/16 (a note per sounding step), 1/16 triplets, 1/32
+enum class ArpRate { eighth, sixteenth, sixteenthTriplet, thirtySecond };
+
 // ROLE Arp: each sounding step of the pattern plays the next note of the chord being heard.
 // The grid keeps the rhythm, accents and slides; a step's note only moves its arp note to the
 // nearest octave. Starts again from its first note on a new chord, mode or octave range.
@@ -327,6 +330,19 @@ public:
     // the internal sequencer's note.
     int next (const FollowHarmony& h, int offset, int home, ArpMode mode, int octaves, Scale fallbackScale) noexcept
     {
+        return pick (h, offset, home, mode, octaves, fallbackScale, true);
+    }
+
+    // The note it played last, once more, in this step's octave (RATE 1/8). A new chord, mode or
+    // range still starts over.
+    int again (const FollowHarmony& h, int offset, int home, ArpMode mode, int octaves, Scale fallbackScale) noexcept
+    {
+        return pick (h, offset, home, mode, octaves, fallbackScale, false);
+    }
+
+private:
+    int pick (const FollowHarmony& h, int offset, int home, ArpMode mode, int octaves, Scale fallbackScale, bool move) noexcept
+    {
         if (! h.heardAnything())
             return home + snapToScale (offset, fallbackScale);
 
@@ -338,6 +354,7 @@ public:
             playing = what;
             pos = 0;
             lastIndex = -1;
+            lastNote = -1;
         }
 
         // The chord's notes from its root nearest home, up through the octaves
@@ -350,6 +367,11 @@ public:
                     tones[(std::size_t) n++] = base + 12 * o + i;
         if (n == 0)
             return home + snapToScale (offset, fallbackScale);
+
+        // The grid's note picks the octave: -6..5 as is, 6..17 up one, -18..-7 down one
+        const int octave = (offset + 6 >= 0 ? offset + 6 : offset + 6 - 11) / 12;
+        if (! move && lastNote >= 0)
+            return std::clamp (lastNote + 12 * octave, 0, 127);
 
         int note = tones[0];
         switch (mode)
@@ -380,13 +402,10 @@ public:
             }
         }
         ++pos;
-
-        // The grid's note picks the octave: -6..5 as is, 6..17 up one, -18..-7 down one
-        const int octave = (offset + 6 >= 0 ? offset + 6 : offset + 6 - 11) / 12;
+        lastNote = note;
         return std::clamp (note + 12 * octave, 0, 127);
     }
 
-private:
     uint32_t nextRandom() noexcept
     {
         rng ^= rng << 13;
@@ -396,7 +415,7 @@ private:
     }
 
     int playing = -1;   // the chord, mode and range the arp is on
-    int pos = 0, lastIndex = -1;
+    int pos = 0, lastIndex = -1, lastNote = -1;   // lastNote: before the grid's octave
     uint32_t rng = 0x303a7b9u;
 };
 } // namespace acid

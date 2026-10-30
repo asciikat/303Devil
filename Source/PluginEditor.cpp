@@ -875,6 +875,9 @@ AcidPanel::AcidPanel (TB303AcidProcessor& p)
     arpModeBox.setTooltip ("ROLE Arp: the order the chord's notes are played in. Jump = each note, then the same note an octave up");
     setupCombo (arpOctavesBox, pid::arpOctaves, arpOctavesAttachment);
     arpOctavesBox.setTooltip ("ROLE Arp: how many octaves the arp climbs. A step's note in the grid moves its arp note by octaves (12 = up one)");
+    setupCombo (arpRateBox, pid::arpRate, arpRateAttachment);
+    arpRateBox.setTooltip ("ROLE Arp: how fast it moves. 1/16 = a new note each sounding step, 1/8 = every other step (the one between repeats it), "
+                           "1/16T and 1/32 = 3 notes per 2 steps and 2 per step, inside the sounding steps (slides glide them, rolls are off)");
     followLabel.setFont (uiFont (12.0f, true));
     followLabel.setJustificationType (juce::Justification::centredLeft);
     followLabel.setInterceptsMouseClicks (false, false);
@@ -1026,7 +1029,7 @@ void AcidPanel::syncControls()
 
     // The ARP boxes only do something with ROLE on Arp
     const bool arp = (int) proc.apvts.getRawParameterValue (pid::role)->load() == (int) acid::Role::arp;
-    for (auto* box : { &arpModeBox, &arpOctavesBox })
+    for (auto* box : { &arpModeBox, &arpOctavesBox, &arpRateBox })
     {
         box->setEnabled (arp);
         box->setAlpha (arp ? 1.0f : 0.4f);
@@ -1362,21 +1365,22 @@ void AcidPanel::resized()
     s.removeFromTop (4);
     auto tools = s.removeFromTop (26);
     tools.removeFromLeft (64);
-    undoButton.setBounds (tools.removeFromLeft (70).reduced (2, 0));
-    redoButton.setBounds (tools.removeFromLeft (70).reduced (2, 0));
+    undoButton.setBounds (tools.removeFromLeft (62).reduced (2, 0));
+    redoButton.setBounds (tools.removeFromLeft (62).reduced (2, 0));
+    tools.removeFromLeft (8);
+    lockRhythmButton.setBounds (tools.removeFromLeft (118).reduced (2, 0));
+    lockPitchButton.setBounds (tools.removeFromLeft (100).reduced (2, 0));
+    tools.removeFromLeft (8);
+    midiButton.setBounds (tools.removeFromLeft (96).reduced (2, 0));
+    midiBarsBox.setBounds (tools.removeFromLeft (76).reduced (2, 0));
     tools.removeFromLeft (12);
-    lockRhythmButton.setBounds (tools.removeFromLeft (130).reduced (2, 0));
-    lockPitchButton.setBounds (tools.removeFromLeft (110).reduced (2, 0));
-    tools.removeFromLeft (12);
-    midiButton.setBounds (tools.removeFromLeft (100).reduced (2, 0));
-    midiBarsBox.setBounds (tools.removeFromLeft (80).reduced (2, 0));
-    tools.removeFromLeft (16);
     roleLabelArea = tools.removeFromLeft (40);
-    roleBox.setBounds (tools.removeFromLeft (92).reduced (2, 0));
+    roleBox.setBounds (tools.removeFromLeft (88).reduced (2, 0));
     tools.removeFromLeft (4);
-    arpModeBox.setBounds (tools.removeFromLeft (92).reduced (2, 0));
-    arpOctavesBox.setBounds (tools.removeFromLeft (70).reduced (2, 0));
-    tools.removeFromLeft (12);
+    arpModeBox.setBounds (tools.removeFromLeft (88).reduced (2, 0));
+    arpOctavesBox.setBounds (tools.removeFromLeft (68).reduced (2, 0));
+    arpRateBox.setBounds (tools.removeFromLeft (64).reduced (2, 0));
+    tools.removeFromLeft (10);
     followLabel.setBounds (tools);
 
     s.removeFromTop (6);

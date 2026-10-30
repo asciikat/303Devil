@@ -364,6 +364,94 @@ int runFollowTests()
         ok &= report ("arp engine plays the chord on the grid's rhythm", notes == want && slideHeld);
     }
 
+    // ARP again(): the last note once more, in this step's octave; a new chord still starts over
+    {
+        using acid::ArpMode;
+        acid::FollowHarmony h;
+        auto hold = [&h] (std::initializer_list<int> chord) { for (int n = 0; n < 128; ++n) h.noteOff (n); for (int n : chord) h.noteOn (n); };
+        acid::FollowArp arp, fresh;
+        hold ({ 60, 63, 67 });   // Cm
+        const bool first = fresh.again (h, 0, 36, ArpMode::up, 2, Scale::off) == 36;   // nothing played yet: the first note
+        std::vector<int> got;
+        auto next = [&] (int offset) { got.push_back (arp.next (h, offset, 36, ArpMode::up, 2, Scale::off)); };
+        auto again = [&] (int offset) { got.push_back (arp.again (h, offset, 36, ArpMode::up, 2, Scale::off)); };
+        next (0); again (0); again (12); next (0); again (-12); next (0);
+        hold ({ 56, 60, 63 });   // Ab: starts over even on again()
+        again (0); next (0); again (0);
+        printNotes ("arp again", got);
+        ok &= report ("arp again repeats the note, a new chord starts over",
+                      first && got == std::vector<int> { 36, 36, 48, 39, 27, 43, 32, 36, 36 });
+    }
+
+    // ARP RATE: 1/16 = a note per sounding step; 1/8 = the arp moves once per 8th (the step after
+    // repeats); 1/32 = two notes inside each sounding step; 1/16T = three per 8th, at triplet points
+    {
+        using acid::ArpRate;
+        // The notes heard over 8 steps (a new gate, or a new pitch under a held gate) at 120 BPM, Cm held
+        auto heard = [] (ArpRate rate, const char* pattern, std::vector<bool>* gateAt = nullptr)
+        {
+            acid::AcidEngine engine;
+            engine.prepare (44100.0);
+            acid::EngineParams p;
+            p.source = acid::EngineParams::followMidi;
+            p.role = (int) Role::arp;
+            p.arpMode = (int) acid::ArpMode::up;
+            p.arpOctaves = 2;
+            p.arpRate = (int) rate;
+            p.clock = acid::EngineParams::freeRun;
+            p.bpm = 120.0;   // 5512.5 samples per step
+            p.root = 36;
+            p.length = 4;
+            engine.patterns[0].loadFromString (pattern);
+            engine.setParams (p);
+            engine.midiNoteOn (60, 100); engine.midiNoteOn (63, 100); engine.midiNoteOn (67, 100);
+            std::vector<int> notes;
+            std::vector<float> l (32), r (32);
+            bool was = false;
+            int lastNote = -1, lastTenth = -1;
+            for (int done = 0; done < (int) (8 * 5512.5) - 100; done += 32)
+            {
+                engine.render (l.data(), r.data(), 32);
+                const bool on = engine.getVoice().isGateOn();
+                const int note = engine.getCurrentNote();
+                if (on && (! was || note != lastNote))
+                    notes.push_back (note);
+                const int tenth = (int) ((done + 32) / 5512.5 * 10.0);   // tenths of a step
+                if (gateAt != nullptr && tenth != lastTenth && (tenth % 10 == 4 || tenth % 10 == 9))
+                    gateAt->push_back (on);   // at 0.4 and 0.9 of each step
+                lastTenth = tenth;
+                was = on;
+                lastNote = note;
+            }
+            return notes;
+        };
+
+        const auto r16 = heard (ArpRate::sixteenth, "0 0 0 0");
+        const auto r8 = heard (ArpRate::eighth, "0 0 0 0");
+        const auto r8rest = heard (ArpRate::eighth, "- 0 0 0");
+        const auto r32 = heard (ArpRate::thirtySecond, "0 0 0 0");
+        const auto r16t = heard (ArpRate::sixteenthTriplet, "0 0 0 0");
+        std::vector<bool> gates;
+        const auto r32slide = heard (ArpRate::thirtySecond, "0 0s 0 -", &gates);
+        printNotes ("arp rate 1/16", r16); printNotes ("arp rate 1/8", r8); printNotes ("arp rate 1/8 rest first", r8rest);
+        printNotes ("arp rate 1/32", r32); printNotes ("arp rate 1/16T", r16t); printNotes ("arp rate 1/32 slide", r32slide);
+        ok &= report ("arp rate 1/16 = a note per step", r16 == std::vector<int> { 36, 39, 43, 48, 51, 55, 36, 39 });
+        ok &= report ("arp rate 1/8 = once per 8th, the step after repeats",
+                      r8 == std::vector<int> { 36, 36, 39, 39, 43, 43, 48, 48 } && r8rest == std::vector<int> { 36, 39, 39, 43, 48, 48 });
+        ok &= report ("arp rate 1/32 = two notes per step",
+                      r32 == std::vector<int> { 36, 39, 43, 48, 51, 55, 36, 39, 43, 48, 51, 55, 36, 39, 43, 48 });
+        ok &= report ("arp rate 1/16T = three notes per 8th", r16t == std::vector<int> { 36, 39, 43, 48, 51, 55, 36, 39, 43, 48, 51, 55 });
+        // Gate at 0.4 and 0.9 of each step: a plain step's two notes each have a quarter-step gate (off
+        // at both); the slide step holds its gate through both notes (on at both); the rest is silent
+        const bool slideGates = gates.size() >= 8
+                                && std::vector<bool> (gates.begin(), gates.begin() + 8) == std::vector<bool> { false, false, true, true, false, false, false, false };
+        std::printf ("arp rate 1/32 slide gates:");
+        for (bool g : gates) std::printf (" %d", g ? 1 : 0);
+        std::printf ("\n");
+        ok &= report ("arp rate 1/32: a slide step glides both its notes",
+                      r32slide == std::vector<int> { 36, 39, 43, 48, 51, 55, 36, 39, 43, 48, 51, 55 } && slideGates);
+    }
+
     // GENERATE per role
     {
         int bassDownbeats = 0, bassGated = 0, bassAccentOffbeat = 0, bassAccents = 0, bassSlides = 0;

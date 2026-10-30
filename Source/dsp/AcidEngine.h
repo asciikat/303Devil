@@ -56,6 +56,7 @@ struct EngineParams
     int    role           = 0;      // acid::Role: how followed notes are placed
     int    arpMode        = 0;      // acid::ArpMode, for role Arp
     int    arpOctaves     = 2;      // 1..3
+    int    arpRate        = 1;      // acid::ArpRate; 1 = 1/16, a note per sounding step
 
     // Cheat panel
     double squelch    = 0.0;        // one-knob acid macro, 0..1
@@ -451,10 +452,33 @@ private:
             const bool slideIn = contiguous && gateHigh && currentStepData.gate && currentStepData.slide;
 
             currentHit = 0;
-            if (step.gate)
+            arpTicks = 0;
+            const bool arping = params.source == EngineParams::followMidi && params.role == (int) Role::arp;
+            const auto rate = (ArpRate) params.arpRate;
+            if (step.gate && arping && (rate == ArpRate::thirtySecond || rate == ArpRate::sixteenthTriplet))
             {
-                if (params.source == EngineParams::followMidi && params.role == (int) Role::arp)
-                    currentNote = arp.next (harmony, step.note, params.root, (ArpMode) params.arpMode, params.arpOctaves, (Scale) params.scale);
+                // The arp's own notes play inside the step, below; a slide into the step holds on
+                arpTicks = arpTicksIn (absStep, rate);
+                arpTick = -1;
+                arpSlideIn = slideIn;
+                if (gateHigh && ! slideIn)
+                {
+                    voice.noteOff();
+                    gateHigh = false;
+                }
+            }
+            else if (step.gate)
+            {
+                if (arping)
+                {
+                    // 1/16: the next note every sounding step. 1/8: the arp moves once per 8th, and a
+                    // later sounding step in the same 8th plays its note again
+                    const int64_t eighth = (absStep >= 0 ? absStep : absStep - 1) / 2;
+                    const bool move = rate != ArpRate::eighth || eighth != arpEighth;
+                    arpEighth = eighth;
+                    currentNote = move ? arp.next (harmony, step.note, params.root, (ArpMode) params.arpMode, params.arpOctaves, (Scale) params.scale)
+                                       : arp.again (harmony, step.note, params.root, (ArpMode) params.arpMode, params.arpOctaves, (Scale) params.scale);
+                }
                 else if (params.source == EngineParams::followMidi)
                     currentNote = harmony.noteFor (step.note, params.root, (Role) params.role, (Scale) params.scale);
                 else
@@ -471,6 +495,12 @@ private:
             currentStepData = step;
             currentStep = index;
             lastAbsStep = absStep;
+        }
+
+        if (arpTicks > 0)
+        {
+            playArpTicks (stepFrac);
+            return;
         }
 
         // A rolled step is played as several quick hits: the first keeps the step's accent,
@@ -492,6 +522,40 @@ private:
         }
     }
 
+    // ROLE Arp at 1/32 and 1/16T: where the arp's notes fall inside a sounding step (fractions of
+    // it). Triplet 16ths are three to an 8th: two in its first step, one in the second.
+    int arpTicksIn (int64_t absStep, ArpRate rate) noexcept
+    {
+        if (rate == ArpRate::thirtySecond)
+        {
+            arpTickAt = { 0.0, 0.5 };
+            arpGate = 0.25;
+            return 2;
+        }
+        arpGate = 1.0 / 3.0;
+        arpTickAt = (absStep & 1) == 0 ? std::array<double, 2> { 0.0, 2.0 / 3.0 } : std::array<double, 2> { 1.0 / 3.0, 0.0 };
+        return (absStep & 1) == 0 ? 2 : 1;
+    }
+
+    // Each of those notes has its own half-length gate and the first takes the step's accent;
+    // in a slide step they glide into each other and on into the next step. Rolls don't apply.
+    void playArpTicks (double stepFrac) noexcept
+    {
+        while (arpTick + 1 < arpTicks && stepFrac >= arpTickAt[(std::size_t) (arpTick + 1)])
+        {
+            ++arpTick;
+            const bool first = arpTick == 0;
+            currentNote = arp.next (harmony, currentStepData.note, params.root, (ArpMode) params.arpMode, params.arpOctaves, (Scale) params.scale);
+            voice.noteOn (currentNote, first && currentStepData.accent, first ? arpSlideIn : currentStepData.slide && gateHigh);
+            gateHigh = true;
+        }
+        if (gateHigh && arpTick >= 0 && ! currentStepData.slide && stepFrac - arpTickAt[(std::size_t) arpTick] >= arpGate)
+        {
+            voice.noteOff();
+            gateHigh = false;
+        }
+    }
+
     void stopSequencer() noexcept
     {
         if (gateHigh)
@@ -499,6 +563,8 @@ private:
         gateHigh = false;
         wasRunning = false;
         arp.reset();   // the arp starts from its first note when the sequencer does
+        arpTicks = 0;
+        arpEighth = kNoStep;
         lastAbsStep = kNoStep;
         currentStep = -1;
         currentStepData = {};
@@ -550,6 +616,13 @@ private:
     int currentHit = 0, currentNote = 0;   // which hit of a rolled step is playing, and its pitch
     int playingPattern = 0;
     Step currentStepData {};
+
+    // ROLE Arp: notes inside the current step (RATE 1/32, 1/16T), and the 8th it last moved in (1/8)
+    std::array<double, 2> arpTickAt {};
+    int arpTicks = 0, arpTick = -1;
+    double arpGate = 0.25;
+    bool arpSlideIn = false;
+    int64_t arpEighth = kNoStep;
 
     // MIDI input: held keys, last-note priority
     std::array<int, 16> held {};

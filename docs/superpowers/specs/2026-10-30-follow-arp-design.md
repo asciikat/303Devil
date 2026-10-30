@@ -30,6 +30,19 @@ tone to chord tone, so the 303 still winds.
   off-beat accents, slides on about a quarter of the steps (at least one), notes 0 with a few 12s.
 - Preset **FOLLOW Acid Arp** (sound only; set ROLE yourself).
 
+## RATE (added the same day)
+A **RATE** box next to OCT (1/8, 1/16, 1/16T, 1/32; default 1/16, so older sessions sound the
+same), greyed out unless ROLE = Arp. The grid still decides when the 303 sounds; RATE sets how fast
+the arp moves through the chord:
+- **1/16**: the next note on every sounding step (as before); rolls repeat it.
+- **1/8**: the arp moves once per 8th. The first sounding step of an 8th takes the next note; a later
+  sounding step in the same 8th plays it again (in its own octave; a slide into it is a tie).
+- **1/32**: two notes inside every sounding step, at 0 and 1/2, each with a quarter-step gate.
+- **1/16T**: three notes per 8th at triplet points: 0 and 2/3 of its first step, 1/3 of the second,
+  each only if its step sounds; each gate is a third of a step.
+- At 1/32 and 1/16T the first note in a step takes its accent; in a slide step the notes glide into
+  each other and on into the next step; rolls don't apply (the arp's own notes replace them).
+
 ## Units
 - `Source/dsp/Follow.h`: `ArpMode`; `FollowHarmony::activeChord()` / `activeRoot()` (chord or
   tonic, shared with `noteFor`); `FollowArp` (`reset()`, `next (harmony, offset, home, mode,
@@ -37,11 +50,11 @@ tone to chord tone, so the 303 still winds.
 - `AcidEngine`: `EngineParams::arpMode`, `arpOctaves`; in Follow MIDI with role Arp a gated step
   takes its note from `FollowArp::next`; the arp resets in `stopSequencer()` and with the harmony.
 - `AcidGenerator::writeArp`; `Role::arp`.
-- Processor: `pid::arpMode` ("arpmode"), `pid::arpOctaves` ("arpoct"), "Arp" added to Role.
+- Processor: `pid::arpMode` ("arpmode"), `pid::arpOctaves` ("arpoct"), `pid::arpRate` ("arprate"), "Arp" added to Role.
   Editor: two combos next to ROLE. Presets: "FOLLOW Acid Arp".
 
 ## Not in scope
-Arp rate or gate settings (the grid does that), latch/hold buttons (FOLLOW already latches),
+Arp gate settings (the grid does that), latch/hold buttons (FOLLOW already latches),
 DRAG MIDI following the arp, the step grid showing the arp notes.
 
 ## Testing

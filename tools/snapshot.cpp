@@ -391,8 +391,8 @@ int main (int argc, char** argv)
             return 1;
     }
 
-    // ROLE Arp: its ARP mode and OCT settings are parameters saved with the session, the editor's
-    // two ARP boxes only work while ROLE is Arp, GENERATE writes an arp rhythm, and the
+    // ROLE Arp: its ARP mode, OCT and RATE settings are parameters saved with the session, the editor's
+    // three ARP boxes only work while ROLE is Arp, GENERATE writes an arp rhythm, and the
     // FOLLOW Acid Arp preset only sets the sound
     {
         TB303AcidProcessor p;
@@ -401,9 +401,12 @@ int main (int argc, char** argv)
         auto* role = choice (p, pid::role);
         auto* mode = choice (p, pid::arpMode);
         auto* octaves = choice (p, pid::arpOctaves);
-        const bool params = role != nullptr && mode != nullptr && octaves != nullptr && role->choices.size() == 4 && role->choices[3] == "Arp"
+        auto* rate = choice (p, pid::arpRate);
+        const bool params = role != nullptr && mode != nullptr && octaves != nullptr && rate != nullptr
+                            && role->choices.size() == 4 && role->choices[3] == "Arp"
                             && mode->choices.joinIntoString (",") == "Up,Down,Up-Down,Random,Jump" && mode->getIndex() == 0
-                            && octaves->choices.joinIntoString (",") == "1 OCT,2 OCT,3 OCT" && octaves->getIndex() == 1;
+                            && octaves->choices.joinIntoString (",") == "1 OCT,2 OCT,3 OCT" && octaves->getIndex() == 1
+                            && rate->choices.joinIntoString (",") == "1/8,1/16,1/16T,1/32" && rate->getIndex() == 1;
 
         std::function<juce::ComboBox* (juce::Component*, const juce::String&)> findBox =
             [&findBox] (juce::Component* c, const juce::String& firstItem) -> juce::ComboBox*
@@ -422,19 +425,25 @@ int main (int argc, char** argv)
             std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
             auto* modeBox = findBox (editor.get(), "Up");
             auto* octBox = findBox (editor.get(), "1 OCT");
-            offForDriver = modeBox != nullptr && octBox != nullptr && ! modeBox->isEnabled() && ! octBox->isEnabled();
+            auto* rateBox = findBox (editor.get(), "1/8");
+            offForDriver = modeBox != nullptr && octBox != nullptr && rateBox != nullptr
+                           && ! modeBox->isEnabled() && ! octBox->isEnabled() && ! rateBox->isEnabled();
             editor.reset();
 
             set (pid::role, 3.0f);
             editor.reset (p.createEditor());
             modeBox = findBox (editor.get(), "Up");
             octBox = findBox (editor.get(), "1 OCT");
-            onForArp = modeBox != nullptr && octBox != nullptr && modeBox->isEnabled() && octBox->isEnabled();
+            rateBox = findBox (editor.get(), "1/8");
+            onForArp = modeBox != nullptr && octBox != nullptr && rateBox != nullptr
+                       && modeBox->isEnabled() && octBox->isEnabled() && rateBox->isEnabled()
+                       && rateBox->getTooltip().contains ("1/32");
             if (onForArp)
             {
                 modeBox->setSelectedItemIndex (4, juce::sendNotificationSync);   // Jump
                 octBox->setSelectedItemIndex (2, juce::sendNotificationSync);    // 3 OCT
-                picked = mode->getIndex() == 4 && octaves->getIndex() == 2;
+                rateBox->setSelectedItemIndex (3, juce::sendNotificationSync);   // 1/32
+                picked = mode->getIndex() == 4 && octaves->getIndex() == 2 && rate->getIndex() == 3;
             }
         }
 
@@ -445,8 +454,9 @@ int main (int argc, char** argv)
         auto* backRole = choice (back, pid::role);
         auto* backMode = choice (back, pid::arpMode);
         auto* backOct = choice (back, pid::arpOctaves);
-        const bool kept = backRole != nullptr && backMode != nullptr && backOct != nullptr
-                          && backRole->getIndex() == 3 && backMode->getIndex() == 4 && backOct->getIndex() == 2;
+        auto* backRate = choice (back, pid::arpRate);
+        const bool kept = backRole != nullptr && backMode != nullptr && backOct != nullptr && backRate != nullptr
+                          && backRole->getIndex() == 3 && backMode->getIndex() == 4 && backOct->getIndex() == 2 && backRate->getIndex() == 3;
 
         p.selectPattern (0);
         p.generatePattern();

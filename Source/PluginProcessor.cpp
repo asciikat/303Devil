@@ -91,6 +91,7 @@ TB303AcidProcessor::TB303AcidProcessor()
     raw.role        = get (pid::role);
     raw.arpMode     = get (pid::arpMode);
     raw.arpOctaves  = get (pid::arpOctaves);
+    raw.arpRate     = get (pid::arpRate);
 
     startTimerHz (5);   // Ghost Hands learns on the message thread
 }
@@ -219,6 +220,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout TB303AcidProcessor::createPa
                                                         StringArray { "Up", "Down", "Up-Down", "Random", "Jump" }, 0));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { pid::arpOctaves, 1 }, "Arp Octaves",
                                                         StringArray { "1 OCT", "2 OCT", "3 OCT" }, 1));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { pid::arpRate, 1 }, "Arp Rate",
+                                                        StringArray { "1/8", "1/16", "1/16T", "1/32" }, 1));
 
     return layout;
 }
@@ -271,6 +274,7 @@ acid::EngineParams TB303AcidProcessor::readParams() const noexcept
     e.role           = (int) raw.role->load();
     e.arpMode        = (int) raw.arpMode->load();
     e.arpOctaves     = (int) raw.arpOctaves->load() + 1;
+    e.arpRate        = (int) raw.arpRate->load();
     e.squelch       = raw.squelch->load();
     e.tweak          = raw.tweak->load();
     e.tweakBeats     = kTweakRateBeats[juce::jlimit (0, (int) std::size (kTweakRateBeats) - 1, (int) raw.tweakRate->load())];

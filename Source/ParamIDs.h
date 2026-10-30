@@ -69,4 +69,5 @@ inline constexpr const char* roll      = "roll";
 inline constexpr const char* role      = "role";
 inline constexpr const char* arpMode   = "arpmode";
 inline constexpr const char* arpOctaves = "arpoct";
+inline constexpr const char* arpRate   = "arprate";
 } // namespace pid
