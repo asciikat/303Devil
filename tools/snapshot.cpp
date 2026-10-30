@@ -375,6 +375,41 @@ int main (int argc, char** argv)
             return 1;
     }
 
+    // Low ENERGY thins out plain off-beat notes but keeps rolls, like it keeps accents.
+    // Energy 0 drops steps 4, 8, 12 and 16 (where GENERATE puts its rolls) unless they're kept.
+    {
+        auto countHits = [] (int ratchet)
+        {
+            acid::AcidEngine engine;
+            engine.prepare (44100.0);
+            acid::EngineParams p;
+            p.clock = acid::EngineParams::freeRun;
+            p.bpm = 120.0;
+            p.length = 4;
+            p.energy = 0.0;
+            engine.patterns[0].set (0, { 0, true, false, false, 0 });
+            engine.patterns[0].set (3, { 0, true, false, false, ratchet });
+            engine.setParams (p);
+            std::vector<float> out (64), outR (64);
+            int edges = 0;
+            bool was = false;
+            for (int done = 0; done < 4 * 5512 - 200; done += 64)
+            {
+                engine.render (out.data(), outR.data(), 64);
+                const bool on = engine.getVoice().isGateOn();
+                edges += on && ! was ? 1 : 0;
+                was = on;
+            }
+            return edges;
+        };
+        const int plain = countHits (0), rolled = countHits (3);
+        // Plain: only the downbeat is left (1). Rolled x4: downbeat + four hits (5).
+        std::printf ("roll at energy 0: plain step hits %d, x4 step hits %d -> %s\n", plain - 1, rolled - 1,
+                     plain == 1 && rolled == 5 ? "ok" : "FAILED");
+        if (! (plain == 1 && rolled == 5))
+            return 1;
+    }
+
     // Show an energy arc on the meter
     setParam (pid::energyArc, 2.0f);
     for (int i = 0; i < 4; ++i)

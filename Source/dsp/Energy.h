@@ -87,7 +87,7 @@ inline double arcEnergy (int arc, double bars) noexcept
 }
 
 // The pattern as played at this energy. The stored pattern never changes. Low energy
-// drops unaccented off-beat notes; high energy adds accents, slides and octave fills.
+// drops plain off-beat notes (accents and rolls stay); high energy adds accents, slides and octave fills.
 // The dice are the same for every phrase, so the groove repeats, except at peak
 // energy, where every 4-bar phrase gets a new roll (live mutation).
 inline Step energiseStep (Step s, int index, int64_t absStep, double e) noexcept
@@ -106,7 +106,7 @@ inline Step energiseStep (Step s, int index, int64_t absStep, double e) noexcept
     if (e <= 0.35)
     {
         const double thin = (0.35 - e) / 0.35;
-        if (s.gate && ! s.accent && index % 4 != 0 && dice (1) < 0.8 * thin)
+        if (s.gate && ! s.accent && s.hits() == 1 && index % 4 != 0 && dice (1) < 0.8 * thin)
             s.gate = false;
     }
     else
