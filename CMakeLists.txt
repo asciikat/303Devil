@@ -64,6 +64,7 @@ if(ACID_BUILD_PLUGIN)
     juce_add_console_app(acid_snapshot PRODUCT_NAME "acid_snapshot")
     target_sources(acid_snapshot PRIVATE
         tools/snapshot.cpp
+        tools/follow_tests.cpp
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp)
     target_include_directories(acid_snapshot PRIVATE Source)

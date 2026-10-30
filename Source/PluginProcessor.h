@@ -122,6 +122,8 @@ public:
     std::atomic<bool> uiGate { false }, uiSlide { false };
     std::atomic<float> uiAccentSweep { 0.0f };
     std::atomic<float> uiEnergy { 0.5f }, uiArcPosition { -1.0f };
+    // FOLLOW readout: key = root pitch class (+12 if minor), chord = pitch-class mask | root << 12; -1 = none
+    std::atomic<int> uiFollowKey { -1 }, uiFollowChord { -1 };
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -140,7 +142,7 @@ private:
                            *squelch, *tweak, *tweakRate, *style, *scale,
                            *ghostPerform, *ghostAmount, *ghostVariation, *ghostLength, *ghostMode,
                            *energy, *energyArc,
-                           *source, *clock, *run, *bpm, *root, *shuffle, *length, *pattern, *accentVel, *roll;
+                           *source, *clock, *run, *bpm, *root, *shuffle, *length, *pattern, *accentVel, *roll, *role;
     };
 
     RawParams raw {};

@@ -11,7 +11,11 @@ Cm Cm G Cm | Ab Ab Fm7 Fm7).
   sequencer keeps playing on its clock. Incoming MIDI (a REAPER MIDI send from the chord track) is not
   played; it is *listened to*:
   - **chord** = the notes held on the input; when all are released the last chord is kept for one
-    bar (4 beats), then it falls back to the key's tonic chord. Lowest note = chord root.
+    bar (4 beats), then it falls back to the key's tonic chord. Notes released at the same moment
+    count as one release, so the whole chord is kept, not the last note to let go; a chord that
+    comes in before the old one lets go (legato) replaces it.
+  - **chord root** from the chord's shape, so inversions work: a fifth above scores most, then a
+    third, then a seventh; the lowest note breaks a tie.
   - **key** = worked out from everything heard (duration-weighted pitch-class histogram, slow decay,
     Krumhansl-Kessler major/minor profiles). Before anything is heard the plugin plays exactly as
     the internal sequencer does (Root Note + Scale Lock).
@@ -20,16 +24,18 @@ Cm Cm G Cm | Ab Ab Fm7 Fm7).
     - Driver: the existing style-based generator, unchanged.
     - Bass: rolling 16ths that rest on every beat (room for the kick), mostly root with octave /
       fifth / seventh pick-ups, accents on the off-beat 8th, almost no slides.
-    - Overlay: sparse (about half the steps), an octave up, a slow walk up and down a chord-tone
-      ladder (0 3 7 10 12 15 19) with long slides and few accents: the winding arpeggio feel.
+    - Overlay: sparse (4-11 notes in 16 steps), mostly an octave up, a walk up and down a
+      chord-tone ladder (7 10 12 15 19 22 24 27) with slides and few accents, written as a
+      half-bar figure that repeats with two changes: the winding arpeggio feel.
   - how a step's note is placed while following:
     - Driver and Bass move with the chord: the pattern's 0 goes to the chord root nearest the
       Root Note; Overlay stays in the key (its 0 is the key root nearest the Root Note) and winds
       through whatever chord is playing.
     - Notes snap to the nearest allowed pitch: the chord tones plus the key's scale tones that are
       not a semitone away from a chord tone. Bass snaps to chord tones only.
-- A readout in the tools row: `FOLLOW  C minor · Ab` (or "waiting for MIDI").
-- Two sound presets: "Acid Bass (Follow)" and "Gentle Overlay".
+- A readout in the tools row: `FOLLOW:  C minor, chord Ab` (or "waiting for MIDI"). The step grid
+  still shows the pattern as written, not the followed notes.
+- Two sound presets: "FOLLOW Acid Bass" and "FOLLOW Gentle Overlay" (sound only; set ROLE yourself).
 
 ## Units
 - `Source/dsp/Follow.h` (plain C++17, no JUCE): `Role`, `FollowHarmony` (noteOn/noteOff/advance,
@@ -48,5 +54,5 @@ Cm Cm G Cm | Ab Ab Fm7 Fm7).
 ## Testing
 `acid_snapshot` checks: chord latch + expiry, key = C minor from the track's progression, note
 placement per role over Cm / G / Ab / Fm7, engine plays the followed notes (Host Sync), bass
-pattern rests on beats, overlay is sparse and higher, saved state keeps role/source.
+pattern rests on beats, overlay is sparse and higher, readout text, saved state keeps role/source.
 Then a real REAPER render of a copy of the test project with an acid bass and an overlay.

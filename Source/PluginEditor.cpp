@@ -866,6 +866,15 @@ AcidPanel::AcidPanel (TB303AcidProcessor& p)
     addAndMakeVisible (midiBarsBox);
     addAndMakeVisible (midiButton);
 
+    // Role: what GENERATE writes, and where Follow MIDI puts it
+    setupCombo (roleBox, pid::role, roleAttachment);
+    roleBox.setTooltip ("Driver = the main acid line. Bass = rolling 16ths on the chord root. Overlay = a sparse line up high. "
+                        "Sets what GENERATE writes; with SOURCE on Follow MIDI it also sets how the notes follow the chords");
+    followLabel.setFont (uiFont (12.0f, true));
+    followLabel.setJustificationType (juce::Justification::centredLeft);
+    followLabel.setInterceptsMouseClicks (false, false);
+    addAndMakeVisible (followLabel);
+
     for (int i = 0; i < acid::kNumPatterns; ++i)
     {
         auto& b = patternButtons[(size_t) i];
@@ -941,6 +950,7 @@ void AcidPanel::applyTheme()
     acidButton.setButtonText (shownAcid ? "ACID MODE: ON" : "ACID MODE: OFF");
     for (auto& k : acidKnobs)
         k->setAlpha (shownAcid ? 1.0f : 0.4f);
+    followLabel.setColour (juce::Label::textColourId, shownAcid ? punk::colours::acidYellow : lnf.sectionText);
     sendLookAndFeelChange();
     repaint();
 }
@@ -1003,6 +1013,11 @@ void AcidPanel::syncControls()
     const juce::String waveText = proc.apvts.getRawParameterValue (pid::wave)->load() > 0.5f ? "WAVE: SQUARE" : "WAVE: SAW";
     if (waveButton.getButtonText() != waveText)
         waveButton.setButtonText (waveText);
+
+    const bool following = (int) proc.apvts.getRawParameterValue (pid::source)->load() == acid::EngineParams::followMidi;
+    const juce::String followText = following ? "FOLLOW:  " + juce::String (acid::follow::describe (proc.uiFollowKey.load(), proc.uiFollowChord.load()))
+                                              : juce::String();
+    followLabel.setText (followText, juce::dontSendNotification);   // repaints only when it changes
 
     // Selected slot is lit; the slot actually playing (if different) is marked with dots
     const int selected = proc.getSelectedPattern();
@@ -1135,6 +1150,7 @@ void AcidPanel::renderBackground (juce::Graphics& g)
         g.setColour (lnf.sectionText);
         g.setFont (uiFont (11.0f, true));
         g.drawText ("PATTERN", patternLabelArea, juce::Justification::centredLeft, false);
+        g.drawText ("ROLE", roleLabelArea, juce::Justification::centredLeft, false);
         return;
     }
 
@@ -1197,6 +1213,9 @@ void AcidPanel::renderBackground (juce::Graphics& g)
     drawSection (seqArea, "SEQUENCER", punk::colours::acidYellow, seqHint, -0.02f);
 
     punk::drawTape (g, patternLabelArea.toFloat().withSizeKeepingCentre (60.0f, 18.0f), "PATT", punk::colours::paper, 0.04f);
+    g.setColour (punk::colours::acidYellow);
+    g.setFont (uiFont (11.0f, true));
+    g.drawText ("ROLE", roleLabelArea, juce::Justification::centredLeft, false);
 }
 
 void AcidPanel::resized()
@@ -1338,6 +1357,11 @@ void AcidPanel::resized()
     tools.removeFromLeft (12);
     midiButton.setBounds (tools.removeFromLeft (100).reduced (2, 0));
     midiBarsBox.setBounds (tools.removeFromLeft (80).reduced (2, 0));
+    tools.removeFromLeft (16);
+    roleLabelArea = tools.removeFromLeft (40);
+    roleBox.setBounds (tools.removeFromLeft (110).reduced (2, 0));
+    tools.removeFromLeft (12);
+    followLabel.setBounds (tools);
 
     s.removeFromTop (6);
     grid.setBounds (s.removeFromTop ((int) (rowTop (kNumGridRows) + 1.0f)));

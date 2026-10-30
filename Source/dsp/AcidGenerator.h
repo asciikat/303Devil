@@ -65,6 +65,9 @@ inline int snapToScale (int note, Scale s)
 //==============================================================================
 enum class Style { classic, hard, hypnotic, minimal, dark, rave };
 
+// What the line is for: the main acid (driver), a bass under the track, or a gentle overlay
+enum class Role { driver, bass, overlay };
+
 class AcidGenerator
 {
 public:
@@ -73,8 +76,25 @@ public:
     // scale == off picks the style's own scale. energy 0.5 = the style as it is; higher
     // writes busier lines with more accents, slides and octave jumps.
     // roll 0..1 = how many steps get fast retriggers (x2..x4); 0 writes none
-    void generate (Pattern& pattern, Style style, Scale scale, double energy = 0.5, double roll = 0.0)
+    // role: driver = the style's acid line; bass and overlay have their own writers (style unused)
+    void generate (Pattern& pattern, Style style, Scale scale, double energy = 0.5, double roll = 0.0, Role role = Role::driver)
     {
+        if (role != Role::driver)
+        {
+            std::array<Step, kNumSteps> steps {};
+            for (auto& s : steps)
+                s.gate = false;
+            const auto e = (float) (2.0 * (std::clamp (energy, 0.0, 1.0) - 0.5));
+            if (role == Role::bass)
+                writeBass (steps, e);
+            else
+                writeOverlay (steps, e);
+            addRolls (steps, roll);
+            for (int i = 0; i < kNumSteps; ++i)
+                pattern.set (i, steps[(std::size_t) i]);
+            return;
+        }
+
         auto rules = rulesFor (style);
         const auto e = (float) (2.0 * (std::clamp (energy, 0.0, 1.0) - 0.5));
         rules.density = std::clamp (rules.density + 0.15f * e, 0.3f, 1.0f);
@@ -187,6 +207,91 @@ private:
             if (i >= 12)    p *= 1.5f;
             if (chance (std::min (p, 0.95f)))
                 s.ratchet = chance (0.75f - 0.4f * amount) ? 1 : (chance (0.5f) ? 2 : 3);
+        }
+    }
+
+    // Rolling techno bass: the kick owns every beat, the line rolls through the three 16ths
+    // after it with the accent on the off-beat 8th. One beat is written and repeated, then the
+    // bar gets octave pops and a pick-up into the next bar. e = energy, -1..1.
+    void writeBass (std::array<Step, kNumSteps>& steps, float e)
+    {
+        std::array<Step, 4> beat {};
+        beat[0] = { 0, false, false, false };   // the kick's
+        beat[1] ={ 0, chance (0.6f + 0.2f * e), false, false };
+        beat[2] = { 0, true, chance (0.55f + 0.15f * e), false };
+        beat[3] = { 0, chance (0.8f), false, false };
+        if (! beat[1].gate && ! beat[3].gate)
+            beat[3].gate = true;
+
+        for (int i = 0; i < kNumSteps; ++i)
+            steps[(std::size_t) i] = beat[(std::size_t) (i % 4)];
+
+        for (int i = 1; i < kNumSteps; ++i)
+        {
+            auto& s = steps[(std::size_t) i];
+            if (! s.gate || i % 4 == 2)
+                continue;
+            if (chance (0.15f + 0.1f * e))
+                s.note = 12;
+            else if (chance (0.1f))
+                s.note = chance (0.5f) ? 7 : 10;
+        }
+
+        // Pick-up: the last 16ths climb or drop, and one slide may glide into it
+        steps[15] = { chance (0.5f) ? 12 : (chance (0.5f) ? 7 : 10), true, false, false };
+        if (steps[14].gate && steps[14].note != steps[15].note && chance (0.35f))
+            steps[14].slide = true;
+    }
+
+    // Gentle overlay: about half the steps, an octave up, walking up and down a chord-tone
+    // ladder with long slides and few accents: the winding arpeggio. Eight steps are written
+    // and answered with a couple of changes. e = energy, -1..1.
+    void writeOverlay (std::array<Step, kNumSteps>& steps, float e)
+    {
+        static constexpr int ladder[] = { 7, 10, 12, 15, 19, 22, 24, 27 };
+        constexpr int top = (int) (sizeof (ladder) / sizeof (ladder[0])) - 1;
+        const float density = std::clamp (0.5f + 0.15f * e, 0.3f, 0.7f);
+
+        int pos = 2 + next (3), direction = chance (0.5f) ? 1 : -1;
+        auto walk = [&]
+        {
+            if (chance (0.25f))
+                direction = -direction;
+            pos += direction * (chance (0.7f) ? 1 : 2);
+            if (pos < 0 || pos > top)
+            {
+                direction = -direction;
+                pos = std::clamp (pos, 0, top);
+            }
+            return ladder[pos];
+        };
+
+        for (int i = 0; i < 8; ++i)
+        {
+            if (i == 0 || chance (density))
+                steps[(std::size_t) i] = { walk(), true, chance (0.12f), chance (0.35f) };
+        }
+        for (int i = 8; i < kNumSteps; ++i)
+            steps[(std::size_t) i] = steps[(std::size_t) (i - 8)];
+        for (int c = 0; c < 2; ++c)
+        {
+            auto& s = steps[(std::size_t) (9 + next (7))];
+            s = { walk(), true, false, chance (0.35f) };
+        }
+
+        // Keep it sparse but not empty: 4 to 11 notes
+        int gated = 0;
+        for (auto& s : steps)
+            gated += s.gate ? 1 : 0;
+        for (int tries = 0; gated > 11 && tries < 64; ++tries)
+        {
+            auto& s = steps[(std::size_t) (1 + next (kNumSteps - 1))];
+            if (s.gate) { s.gate = false; --gated; }
+        }
+        for (int tries = 0; gated < 4 && tries < 64; ++tries)
+        {
+            auto& s = steps[(std::size_t) next (kNumSteps)];
+            if (! s.gate) { s = { walk(), true, false, false }; ++gated; }
         }
     }
 

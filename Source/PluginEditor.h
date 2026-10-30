@@ -192,8 +192,9 @@ private:
                      clearGhostButton { "CLEAR" };
     std::array<juce::TextButton, acid::kNumPatterns> patternButtons;
     juce::ComboBox sourceBox, clockBox, presetBox, libraryBox, styleBox, scaleBox, ghostLengthBox, ghostMenu;
-    juce::ComboBox midiBarsBox;
+    juce::ComboBox midiBarsBox, roleBox;
     MidiDragButton midiButton;
+    juce::Label followLabel;   // what FOLLOW hears: key and chord
     std::unique_ptr<juce::FileChooser> fileChooser;
     std::array<Knob*, acid::ghost::kNumLanes> ghostTargets {};   // the knobs Ghost Hands plays
     StepGrid grid;
@@ -209,11 +210,12 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> acidAttachment, waveAttachment, runAttachment,
                                                                           ghostAttachment, ghostModeAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> sourceAttachment, clockAttachment,
-                                                                            styleAttachment, scaleAttachment, ghostLengthAttachment;
+                                                                            styleAttachment, scaleAttachment, ghostLengthAttachment,
+                                                                            roleAttachment;
 
     juce::Rectangle<int> headerArea, voiceArea, acidArea, fxArea, seqArea, patternLabelArea,
                          cheatArea, styleLabelArea, scaleLabelArea, ghostArea, ghostLengthLabelArea,
-                         energyArea, arcLabelArea;
+                         energyArea, arcLabelArea, roleLabelArea;
     bool shownAcid = false;
     int shownTakes = 0;
     juce::Image background;

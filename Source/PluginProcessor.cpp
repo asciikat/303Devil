@@ -88,6 +88,7 @@ TB303AcidProcessor::TB303AcidProcessor()
     raw.pattern     = get (pid::pattern);
     raw.accentVel   = get (pid::accentVel);
     raw.roll        = get (pid::roll);
+    raw.role        = get (pid::role);
 
     startTimerHz (5);   // Ghost Hands learns on the message thread
 }
@@ -189,7 +190,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TB303AcidProcessor::createPa
 
     // Sequencer
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { pid::source, 1 }, "Note Source",
-                                                        StringArray { "Internal Sequencer", "MIDI Input" }, 0));
+                                                        StringArray { "Internal Sequencer", "MIDI Input", "Follow MIDI" }, 0));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { pid::clock, 1 }, "Clock",
                                                         StringArray { "Host Sync", "Free Run" }, 0));
     layout.add (std::make_unique<AudioParameterBool> (ParameterID { pid::run, 1 }, "Run", true));
@@ -210,6 +211,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout TB303AcidProcessor::createPa
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { pid::roll, 1 }, "Roll", NormalisableRange<float> (0.0f, 1.0f), 0.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction (percentText).withValueFromStringFunction (percentValue)));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { pid::role, 1 }, "Role",
+                                                        StringArray { "Driver", "Bass", "Overlay" }, 0));
 
     return layout;
 }
@@ -259,7 +262,8 @@ acid::EngineParams TB303AcidProcessor::readParams() const noexcept
     e.length         = (int) raw.length->load();
     e.pattern        = getSelectedPattern();
     e.accentVelocity = (int) raw.accentVel->load();
-    e.squelch        = raw.squelch->load();
+    e.role           = (int) raw.role->load();
+    e.squelch       = raw.squelch->load();
     e.tweak          = raw.tweak->load();
     e.tweakBeats     = kTweakRateBeats[juce::jlimit (0, (int) std::size (kTweakRateBeats) - 1, (int) raw.tweakRate->load())];
     e.scale          = (int) raw.scale->load();
@@ -354,6 +358,10 @@ void TB303AcidProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     uiAccentSweep.store ((float) engine.getVoice().getAccentSweep());
     uiEnergy.store ((float) engine.getEnergy());
     uiArcPosition.store ((float) engine.getArcPosition());
+
+    const auto& harmony = engine.getHarmony();
+    uiFollowKey.store (harmony.hasKey() ? harmony.keyRoot() + (harmony.keyMinor() ? 12 : 0) : -1);
+    uiFollowChord.store (harmony.hasChord() ? (harmony.chordMask() | harmony.chordRoot() << 12) : -1);
 }
 
 //==============================================================================
@@ -506,7 +514,7 @@ void TB303AcidProcessor::generatePattern()
     beginPatternEdit();
     acid::AcidGenerator generator ((uint32_t) random.nextInt());
     generator.generate (getPattern(), (acid::Style) (int) raw.style->load(), (acid::Scale) (int) raw.scale->load(),
-                        uiEnergy.load(), raw.roll->load());
+                        uiEnergy.load(), raw.roll->load(), (acid::Role) (int) raw.role->load());
     applyLocks (pending);
     patternEdited();
 }

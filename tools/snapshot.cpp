@@ -4,6 +4,8 @@
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
 
+int runFollowTests();   // tools/follow_tests.cpp
+
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI juce;
@@ -410,10 +412,26 @@ int main (int argc, char** argv)
             return 1;
     }
 
-    // Show an energy arc on the meter
+    // Show an energy arc on the meter, and FOLLOW hearing an Ab chord in C minor
     setParam (pid::energyArc, 2.0f);
-    for (int i = 0; i < 4; ++i)
+    setParam (pid::source, 2.0f);
+    setParam (pid::role, 1.0f);
+    for (int n : { 48, 60, 63, 67 })
+        midi.addEvent (juce::MidiMessage::noteOn (1, n, (juce::uint8) 100), 0);
+    for (int i = 0; i < 64; ++i)
+    {
         processor.processBlock (buffer, midi);
+        midi.clear();
+    }
+    for (int n : { 48, 60, 63, 67 })
+        midi.addEvent (juce::MidiMessage::noteOff (1, n), 0);
+    for (int n : { 56, 60, 63 })
+        midi.addEvent (juce::MidiMessage::noteOn (1, n, (juce::uint8) 100), 1);
+    for (int i = 0; i < 4; ++i)
+    {
+        processor.processBlock (buffer, midi);
+        midi.clear();
+    }
 
     for (bool acid : { false, true })
     {
@@ -449,5 +467,5 @@ int main (int argc, char** argv)
         if (! ok)
             return 1;
     }
-    return 0;
+    return runFollowTests();
 }

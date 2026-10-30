@@ -6,6 +6,7 @@
 #include "AcidGenerator.h"
 #include "Effects.h"
 #include "Energy.h"
+#include "Follow.h"
 #include "GhostHands.h"
 #include "Pattern.h"
 #include "Tb303Voice.h"
@@ -38,7 +39,7 @@ struct FxParams
 
 struct EngineParams
 {
-    enum Source { internalSequencer = 0, midiInput = 1 };
+    enum Source { internalSequencer = 0, midiInput = 1, followMidi = 2 };
     enum Clock  { hostSync = 0, freeRun = 1 };
 
     VoiceParams voice;
@@ -52,6 +53,7 @@ struct EngineParams
     int    length         = kNumSteps;
     int    pattern        = 0;      // requested bank slot; switches at the end of the playing pattern
     int    accentVelocity = 100;    // MIDI input: velocity at or above this = accent
+    int    role           = 0;      // acid::Role: how followed notes are placed
 
     // Cheat panel
     double squelch    = 0.0;        // one-knob acid macro, 0..1
@@ -101,6 +103,8 @@ public:
             stopSequencer();
             releaseAllMidiNotes();
         }
+        if (p.source != params.source)
+            harmony.reset();
 
         params = p;
         voice.setParams (p.voice);
@@ -123,7 +127,7 @@ public:
             double ppq = 0.0;
             const bool clockRunning = tickClock (ppq);
 
-            if (params.source == EngineParams::internalSequencer)
+            if (params.source != EngineParams::midiInput)
             {
                 if (clockRunning)
                 {
@@ -167,6 +171,9 @@ public:
             left[i]  = (float) y + dl + rl;
             right[i] = (float) y + dr + rr;
         }
+
+        if (params.source == EngineParams::followMidi)
+            harmony.advance (numSamples * bpm / (60.0 * fs));
     }
 
     // Mono convenience for tests
@@ -184,6 +191,11 @@ public:
     // MIDI input, applied at the sample position where render() stopped
     void midiNoteOn (int note, int velocity) noexcept
     {
+        if (params.source == EngineParams::followMidi)
+        {
+            harmony.noteOn (note);   // heard, not played
+            return;
+        }
         if (params.source != EngineParams::midiInput)
             return;
 
@@ -199,6 +211,11 @@ public:
 
     void midiNoteOff (int note) noexcept
     {
+        if (params.source == EngineParams::followMidi)
+        {
+            harmony.noteOff (note);
+            return;
+        }
         if (params.source != EngineParams::midiInput || numHeld == 0)
             return;
 
@@ -215,9 +232,14 @@ public:
     void midiAllNotesOff() noexcept
     {
         releaseAllMidiNotes();
+        for (int n = 0; n < 128; ++n)
+            harmony.noteOff (n);
     }
 
+    const FollowHarmony& getHarmony() const noexcept { return harmony; }
+
     int getCurrentStep() const noexcept       { return currentStep; }
+    int getCurrentNote() const noexcept       { return currentNote; }
     double getEnergy() const noexcept         { return energyNow; }
     // 0..1 through the current energy arc's cycle, or -1 in manual
     double getArcPosition() const noexcept
@@ -426,8 +448,10 @@ private:
             currentHit = 0;
             if (step.gate)
             {
-                const int note = snapToScale (step.note, (Scale) params.scale);
-                currentNote = std::clamp (params.root + note, 0, 127);
+                if (params.source == EngineParams::followMidi)
+                    currentNote = harmony.noteFor (step.note, params.root, (Role) params.role, (Scale) params.scale);
+                else
+                    currentNote = std::clamp (params.root + snapToScale (step.note, (Scale) params.scale), 0, 127);
                 voice.noteOn (currentNote, step.accent, slideIn);
                 gateHigh = true;
             }
@@ -495,6 +519,7 @@ private:
     }
 
     Tb303Voice voice;
+    FollowHarmony harmony;
     PingPongDelay delay;
     Reverb reverb;
     double fxCoef = 0.0, delayMix = 0.0, reverbMix = 0.0;
