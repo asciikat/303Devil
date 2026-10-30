@@ -84,6 +84,21 @@ public:
     void pastePattern();
     bool canPaste() const noexcept { return hasClipboard; }
 
+    // Undo / redo of pattern changes (message thread). Call beginPatternEdit() before changing the
+    // selected pattern; the patternEdited() that follows records the undo step if anything changed.
+    void beginPatternEdit();
+    void undoPattern();
+    void redoPattern();
+    bool canUndo() const noexcept { return ! undoStack.empty(); }
+    bool canRedo() const noexcept { return ! redoStack.empty(); }
+
+    // Locks: GENERATE, RANDOM, MUTATE and the pattern library keep one half of the current pattern.
+    // Rhythm = gates, accents and slides stay; pitch = the notes stay.
+    void setLockRhythm (bool on) noexcept { lockRhythm = on; }
+    void setLockPitch (bool on) noexcept  { lockPitch = on; }
+    bool getLockRhythm() const noexcept   { return lockRhythm; }
+    bool getLockPitch() const noexcept    { return lockPitch; }
+
     // Writes the selected pattern as a MIDI file in the temp folder, ready to drag into a host.
     // Returns an empty File if it could not be written.
     juce::File exportPatternMidi (int bars) const;
@@ -135,6 +150,21 @@ private:
     int currentProgram = 0;
     std::array<acid::Step, acid::kNumSteps> clipboard {};
     bool hasClipboard = false;
+
+    struct PatternSnapshot
+    {
+        int slot = -1;
+        std::array<acid::Step, acid::kNumSteps> steps {};
+    };
+    PatternSnapshot takeSnapshot (int slot) const;
+    void restoreSnapshot (const PatternSnapshot&);
+    void applyLocks (const PatternSnapshot& before);
+    bool sameAsCurrent (const PatternSnapshot&) const;
+
+    static constexpr size_t kMaxUndo = 50;
+    PatternSnapshot pending;               // the pattern as it was when the current edit began
+    std::vector<PatternSnapshot> undoStack, redoStack;
+    bool lockRhythm = false, lockPitch = false;
     juce::String ghostName;
     int namedTakes = 0;
     std::vector<float> tempRight;   // right channel when the host gives a mono bus

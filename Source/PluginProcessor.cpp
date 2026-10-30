@@ -350,8 +350,105 @@ void TB303AcidProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
 }
 
 //==============================================================================
+TB303AcidProcessor::PatternSnapshot TB303AcidProcessor::takeSnapshot (int slot) const
+{
+    PatternSnapshot s;
+    s.slot = slot;
+    for (int i = 0; i < acid::kNumSteps; ++i)
+        s.steps[(size_t) i] = engine.patterns[(size_t) slot].get (i);
+    return s;
+}
+
+void TB303AcidProcessor::restoreSnapshot (const PatternSnapshot& s)
+{
+    for (int i = 0; i < acid::kNumSteps; ++i)
+        engine.patterns[(size_t) s.slot].set (i, s.steps[(size_t) i]);
+}
+
+bool TB303AcidProcessor::sameAsCurrent (const PatternSnapshot& s) const
+{
+    for (int i = 0; i < acid::kNumSteps; ++i)
+    {
+        const auto a = s.steps[(size_t) i], b = engine.patterns[(size_t) s.slot].get (i);
+        if (a.note != b.note || a.gate != b.gate || a.accent != b.accent || a.slide != b.slide)
+            return false;
+    }
+    return true;
+}
+
+void TB303AcidProcessor::beginPatternEdit()
+{
+    pending = takeSnapshot (getSelectedPattern());
+}
+
+void TB303AcidProcessor::applyLocks (const PatternSnapshot& before)
+{
+    if (! lockRhythm && ! lockPitch)
+        return;
+
+    auto& pattern = engine.patterns[(size_t) before.slot];
+    for (int i = 0; i < acid::kNumSteps; ++i)
+    {
+        auto s = pattern.get (i);
+        const auto& old = before.steps[(size_t) i];
+        if (lockRhythm)
+        {
+            s.gate = old.gate;
+            s.accent = old.accent;
+            s.slide = old.slide;
+        }
+        if (lockPitch)
+            s.note = old.note;
+        pattern.set (i, s);
+    }
+}
+
+void TB303AcidProcessor::undoPattern()
+{
+    if (undoStack.empty())
+        return;
+
+    const auto step = undoStack.back();
+    undoStack.pop_back();
+    redoStack.push_back (takeSnapshot (step.slot));
+    restoreSnapshot (step);
+    pending.slot = -1;
+    if (step.slot != getSelectedPattern())
+        selectPattern (step.slot);
+    ++patternVersion;
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged (true));
+}
+
+void TB303AcidProcessor::redoPattern()
+{
+    if (redoStack.empty())
+        return;
+
+    const auto step = redoStack.back();
+    redoStack.pop_back();
+    undoStack.push_back (takeSnapshot (step.slot));
+    restoreSnapshot (step);
+    pending.slot = -1;
+    if (step.slot != getSelectedPattern())
+        selectPattern (step.slot);
+    ++patternVersion;
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged (true));
+}
+
 void TB303AcidProcessor::patternEdited()
 {
+    if (pending.slot >= 0)
+    {
+        if (! sameAsCurrent (pending))
+        {
+            undoStack.push_back (pending);
+            if (undoStack.size() > kMaxUndo)
+                undoStack.erase (undoStack.begin());
+            redoStack.clear();
+        }
+        pending.slot = -1;
+    }
+
     ++patternVersion;
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged (true));
 }
@@ -362,6 +459,7 @@ void TB303AcidProcessor::randomizePattern()
     static constexpr int scale[] = { 0, 0, 0, 0, 3, 5, 7, 7, 10, 12, 12, 15, -2, -5 };
     constexpr int scaleSize = (int) std::size (scale);
 
+    beginPatternEdit();
     auto& pattern = getPattern();
     for (int i = 0; i < acid::kNumSteps; ++i)
     {
@@ -372,11 +470,13 @@ void TB303AcidProcessor::randomizePattern()
         s.slide  = s.gate && random.nextFloat() < 0.28f;
         pattern.set (i, s);
     }
+    applyLocks (pending);
     patternEdited();
 }
 
 void TB303AcidProcessor::initPattern()
 {
+    beginPatternEdit();
     getPattern().clear();
     patternEdited();
 }
@@ -385,15 +485,19 @@ void TB303AcidProcessor::loadLibraryPattern (int libraryIndex)
 {
     if (! juce::isPositiveAndBelow (libraryIndex, acid::kNumLibraryPatterns))
         return;
+    beginPatternEdit();
     getPattern().loadFromString (acid::kPatternLibrary[libraryIndex].steps);
+    applyLocks (pending);
     patternEdited();
 }
 
 void TB303AcidProcessor::generatePattern()
 {
+    beginPatternEdit();
     acid::AcidGenerator generator ((uint32_t) random.nextInt());
     generator.generate (getPattern(), (acid::Style) (int) raw.style->load(), (acid::Scale) (int) raw.scale->load(),
                         uiEnergy.load());
+    applyLocks (pending);
     patternEdited();
 }
 
@@ -401,15 +505,23 @@ void TB303AcidProcessor::mutatePattern()
 {
     // Change 2-4 steps: a new note, or flip accent / slide / rest. Keeps the groove recognisable.
     static constexpr int scale[] = { 0, 0, 3, 5, 7, 10, 12, 12, -2, 15 };
+    beginPatternEdit();
     auto& pattern = getPattern();
     const int changes = 2 + random.nextInt (3);
     for (int c = 0; c < changes; ++c)
     {
+        // With a lock on, only change the half that is still free
+        std::vector<int> kinds;
+        if (! lockPitch)  kinds.push_back (0);
+        if (! lockRhythm) kinds.insert (kinds.end(), { 1, 2, 3 });
+        if (kinds.empty())
+            break;
+
         const int i = random.nextInt (acid::kNumSteps);
         auto s = pattern.get (i);
-        switch (random.nextInt (4))
+        switch (kinds[(size_t) random.nextInt ((int) kinds.size())])
         {
-            case 0:  s.note = scale[random.nextInt ((int) std::size (scale))]; s.gate = true; break;
+            case 0:  s.note = scale[random.nextInt ((int) std::size (scale))]; s.gate = s.gate || ! lockRhythm; break;
             case 1:  s.accent = ! s.accent; break;
             case 2:  s.slide = ! s.slide; break;
             default: s.gate = ! s.gate; break;
@@ -440,6 +552,7 @@ void TB303AcidProcessor::pastePattern()
     if (! hasClipboard)
         return;
 
+    beginPatternEdit();
     auto& pattern = getPattern();
     for (int i = 0; i < acid::kNumSteps; ++i)
         pattern.set (i, clipboard[(size_t) i]);
@@ -729,6 +842,8 @@ void TB303AcidProcessor::getStateInformation (juce::MemoryBlock& destData)
         state.appendChild (ghostTree, nullptr);
 
     state.setProperty ("program", currentProgram, nullptr);
+    state.setProperty ("lockRhythm", lockRhythm, nullptr);
+    state.setProperty ("lockPitch", lockPitch, nullptr);
 
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
@@ -765,6 +880,11 @@ void TB303AcidProcessor::setStateInformation (const void* data, int sizeInBytes)
         tree.removeChild (ghostTree, nullptr);
 
     currentProgram = juce::jlimit (0, presets::kNumFactory - 1, (int) tree.getProperty ("program", 0));
+    lockRhythm = (bool) tree.getProperty ("lockRhythm", false);
+    lockPitch = (bool) tree.getProperty ("lockPitch", false);
+    undoStack.clear();   // the restored bank replaces what the history was about
+    redoStack.clear();
+    pending.slot = -1;
     apvts.replaceState (tree);
     ++patternVersion;
     updateGhostBrain();

@@ -354,6 +354,7 @@ void StepGrid::mouseDown (const juce::MouseEvent& e)
     if (column < 0 || row <= numberRow)
         return;
 
+    proc.beginPatternEdit();
     const auto s = proc.getPattern().get (column);
 
     if (row == noteRow)
@@ -405,6 +406,7 @@ void StepGrid::mouseDoubleClick (const juce::MouseEvent& e)
     const int column = columnAt (e.position.x);
     if (column >= 0 && rowAt (e.position.y) == noteRow)
     {
+        proc.beginPatternEdit();
         setNote (column, 0);
         proc.patternEdited();
     }
@@ -416,6 +418,7 @@ void StepGrid::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheel
     if (column < 0 || rowAt (e.position.y) != noteRow || std::abs (wheel.deltaY) < 1.0e-6f)
         return;
 
+    proc.beginPatternEdit();
     setNote (column, proc.getPattern().get (column).note + (wheel.deltaY > 0.0f ? 1 : -1));
     proc.patternEdited();
 }
@@ -808,6 +811,17 @@ AcidPanel::AcidPanel (TB303AcidProcessor& p)
     for (auto* b : { &randomButton, &initButton, &copyButton, &pasteButton, &mutateButton })
         addAndMakeVisible (*b);
 
+    undoButton.onClick = [this] { proc.undoPattern(); };
+    redoButton.onClick = [this] { proc.redoPattern(); };
+    lockRhythmButton.setClickingTogglesState (true);
+    lockRhythmButton.onClick = [this] { proc.setLockRhythm (lockRhythmButton.getToggleState()); };
+    lockRhythmButton.setTooltip ("GENERATE, RANDOM, MUTATE and the pattern library keep the gates, accents and slides");
+    lockPitchButton.setClickingTogglesState (true);
+    lockPitchButton.onClick = [this] { proc.setLockPitch (lockPitchButton.getToggleState()); };
+    lockPitchButton.setTooltip ("GENERATE, RANDOM, MUTATE and the pattern library keep the notes");
+    for (auto* b : { &undoButton, &redoButton, &lockRhythmButton, &lockPitchButton })
+        addAndMakeVisible (*b);
+
     for (int bars : { 1, 2, 4, 8 })
         midiBarsBox.addItem (juce::String (bars) + (bars == 1 ? " bar" : " bars"), bars);
     midiBarsBox.setSelectedId (4, juce::dontSendNotification);
@@ -965,6 +979,10 @@ void AcidPanel::syncControls()
             b.setButtonText (text);
     }
     pasteButton.setEnabled (proc.canPaste());
+    undoButton.setEnabled (proc.canUndo());
+    redoButton.setEnabled (proc.canRedo());
+    lockRhythmButton.setToggleState (proc.getLockRhythm(), juce::dontSendNotification);
+    lockPitchButton.setToggleState (proc.getLockPitch(), juce::dontSendNotification);
 
     if (presetBox.getSelectedItemIndex() != proc.getCurrentProgram())
         presetBox.setSelectedItemIndex (proc.getCurrentProgram(), juce::dontSendNotification);
@@ -1270,9 +1288,18 @@ void AcidPanel::resized()
     mutateButton.setBounds (strip.removeFromLeft (84).reduced (2, 0));
     strip.removeFromLeft (12);
     libraryBox.setBounds (strip.removeFromLeft (240));
-    strip.removeFromLeft (12);
-    midiButton.setBounds (strip.removeFromLeft (100).reduced (2, 0));
-    midiBarsBox.setBounds (strip.removeFromLeft (80).reduced (2, 0));
+
+    s.removeFromTop (4);
+    auto tools = s.removeFromTop (26);
+    tools.removeFromLeft (64);
+    undoButton.setBounds (tools.removeFromLeft (70).reduced (2, 0));
+    redoButton.setBounds (tools.removeFromLeft (70).reduced (2, 0));
+    tools.removeFromLeft (12);
+    lockRhythmButton.setBounds (tools.removeFromLeft (130).reduced (2, 0));
+    lockPitchButton.setBounds (tools.removeFromLeft (110).reduced (2, 0));
+    tools.removeFromLeft (12);
+    midiButton.setBounds (tools.removeFromLeft (100).reduced (2, 0));
+    midiBarsBox.setBounds (tools.removeFromLeft (80).reduced (2, 0));
 
     s.removeFromTop (6);
     grid.setBounds (s.removeFromTop ((int) (rowTop (5) + 1.0f)));

@@ -185,6 +185,8 @@ private:
     std::vector<std::unique_ptr<Knob>> voiceKnobs, acidKnobs, fxKnobs, seqKnobs, cheatKnobs, ghostKnobs;
     juce::TextButton acidButton, waveButton, runButton, randomButton { "RANDOM" }, initButton { "INIT" },
                      copyButton { "COPY" }, pasteButton { "PASTE" }, mutateButton { "MUTATE" },
+                     undoButton { "UNDO" }, redoButton { "REDO" },
+                     lockRhythmButton { "LOCK RHYTHM" }, lockPitchButton { "LOCK PITCH" },
                      generateButton { "GENERATE" }, recButton { "REC" }, ghostButton, ghostModeButton,
                      clearGhostButton { "CLEAR" };
     std::array<juce::TextButton, acid::kNumPatterns> patternButtons;

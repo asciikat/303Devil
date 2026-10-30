@@ -148,6 +148,87 @@ int main (int argc, char** argv)
             return 1;
     }
 
+    // Undo / redo and the rhythm / pitch locks
+    {
+        TB303AcidProcessor p;
+        p.selectPattern (0);
+        using Steps = std::array<acid::Step, acid::kNumSteps>;
+        auto read = [&p] { Steps s; for (int i = 0; i < acid::kNumSteps; ++i) s[(size_t) i] = p.getPattern().get (i); return s; };
+        auto same = [] (const Steps& a, const Steps& b)
+        {
+            for (size_t i = 0; i < a.size(); ++i)
+                if (a[i].note != b[i].note || a[i].gate != b[i].gate || a[i].accent != b[i].accent || a[i].slide != b[i].slide)
+                    return false;
+            return true;
+        };
+
+        const Steps original = read();
+        p.generatePattern();
+        const Steps generated = read();
+        bool ok = ! same (original, generated) && p.canUndo() && ! p.canRedo();
+        p.undoPattern();
+        ok = ok && same (read(), original) && ! p.canUndo() && p.canRedo();
+        p.redoPattern();
+        ok = ok && same (read(), generated) && p.canUndo() && ! p.canRedo();
+
+        // A grid edit (begin ... edited) is one undo step, and a new edit clears redo
+        p.undoPattern();
+        p.beginPatternEdit();
+        auto step = p.getPattern().get (3);
+        step.note += 5;
+        p.getPattern().set (3, step);
+        p.patternEdited();
+        ok = ok && p.canUndo() && ! p.canRedo();
+        p.beginPatternEdit();   // an edit that changes nothing must not add a step
+        p.patternEdited();
+        p.undoPattern();
+        ok = ok && same (read(), original) && ! p.canUndo();
+        std::printf ("undo / redo -> %s\n", ok ? "ok" : "FAILED");
+        if (! ok)
+            return 1;
+
+        // Locks: 40 generate / random / mutate rounds each, from a fresh pattern
+        auto lockRun = [&] (bool rhythm, bool pitch)
+        {
+            TB303AcidProcessor q;
+            q.selectPattern (0);
+            q.setLockRhythm (rhythm);
+            q.setLockPitch (pitch);
+            Steps base; for (int i = 0; i < acid::kNumSteps; ++i) base[(size_t) i] = q.getPattern().get (i);
+            bool kept = true, changedFree = false;
+            for (int round = 0; round < 40; ++round)
+            {
+                if (round % 3 == 0)      q.generatePattern();
+                else if (round % 3 == 1) q.randomizePattern();
+                else                     q.mutatePattern();
+                for (int i = 0; i < acid::kNumSteps; ++i)
+                {
+                    const auto s = q.getPattern().get (i), b = base[(size_t) i];
+                    if (rhythm && (s.gate != b.gate || s.accent != b.accent || s.slide != b.slide)) kept = false;
+                    if (pitch && s.note != b.note) kept = false;
+                    if ((! rhythm && (s.gate != b.gate || s.accent != b.accent || s.slide != b.slide))
+                        || (! pitch && s.note != b.note))
+                        changedFree = true;
+                }
+            }
+            return kept && (changedFree || (rhythm && pitch));
+        };
+        const bool rhythmOk = lockRun (true, false), pitchOk = lockRun (false, true), bothOk = lockRun (true, true);
+        std::printf ("lock rhythm -> %s, lock pitch -> %s, both -> %s\n", rhythmOk ? "ok" : "FAILED",
+                     pitchOk ? "ok" : "FAILED", bothOk ? "ok" : "FAILED");
+
+        // The locks are saved with the session
+        p.setLockRhythm (true);
+        juce::MemoryBlock saved;
+        p.getStateInformation (saved);
+        TB303AcidProcessor restored;
+        restored.setStateInformation (saved.getData(), (int) saved.getSize());
+        const bool persisted = restored.getLockRhythm() && ! restored.getLockPitch();
+        std::printf ("locks saved with session -> %s\n", persisted ? "ok" : "FAILED");
+        if (! (rhythmOk && pitchOk && bothOk && persisted))
+            return 1;
+    }
+
     // Show an energy arc on the meter
     setParam (pid::energyArc, 2.0f);
     for (int i = 0; i < 4; ++i)
