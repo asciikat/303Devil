@@ -83,6 +83,33 @@ int runFollowTests()
         ok &= report ("follow key from Cm G Ab Fm7", h.hasKey() && h.keyRoot() == 0 && h.keyMinor());
     }
 
+    // Key stays put on thin evidence: one bar of Cm then one of G is still C minor, not G major
+    {
+        acid::FollowHarmony h;
+        play (h, { 60, 63, 67 }, 4.0);
+        play (h, { 59, 62, 67 }, 4.0);
+        const bool early = h.keyName() == "C minor";
+        std::printf ("follow key after Cm G: %s\n", h.keyName().c_str());
+        play (h, { 60, 63, 67 }, 4.0);
+        play (h, { 60, 63, 68 }, 4.0);
+        play (h, { 59, 62, 67 }, 4.0);
+        const bool later = h.keyName() == "C minor";
+        std::printf ("follow key early: %s\n", h.keyName().c_str());
+        ok &= report ("follow key holds through the first bars", early && later);
+
+        // ...but a track that really is in G major gets there
+        acid::FollowHarmony g;
+        for (int i = 0; i < 4; ++i)
+        {
+            play (g, { 55, 59, 62 }, 4.0);
+            play (g, { 60, 64, 67 }, 4.0);
+            play (g, { 62, 66, 69 }, 4.0);
+            play (g, { 55, 59, 62 }, 4.0);
+        }
+        std::printf ("follow key G C D G: %s\n", g.keyName().c_str());
+        ok &= report ("follow key moves when the music does", g.keyName() == "G major");
+    }
+
     // Where a pattern note lands, per role, over each chord of the loop
     {
         acid::FollowHarmony h;

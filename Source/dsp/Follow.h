@@ -16,6 +16,8 @@ namespace follow
 {
 inline constexpr double kLatchBeats    = 4.0;    // a released chord holds for a bar, then the key's tonic takes over
 inline constexpr double kKeyHalfLife   = 64.0;   // beats; old harmony fades so the key can move with the track
+inline constexpr double kKeyMinBeats   = 16.0;   // the first chord's guess stands until this much has been heard
+inline constexpr double kKeyMargin     = 0.1;    // another key must fit this much better (correlation) to take over
 inline constexpr int    kMajorScale    = 0b101010110101;   // 0 2 4 5 7 9 11
 inline constexpr int    kMinorScale    = 0b010110101101;   // 0 2 3 5 7 8 10
 
@@ -128,8 +130,8 @@ public:
         root = follow::chordRootOf (chord, follow::pitchClass (lowest));
         latched = true;
         silentBeats = 0.0;
-        if (! keyKnown)
-            updateKey();
+        if (heardBeats <= 0.0)
+            updateKey();   // still the first chord: guess again with this note in it
     }
 
     void noteOff (int note) noexcept
@@ -177,10 +179,14 @@ public:
         const double fade = std::exp2 (-beats / follow::kKeyHalfLife);
         for (auto& w : weight)
             w *= fade;
+        heardBeats *= fade;
         if (numHeld > 0)
+        {
+            heardBeats += beats;
             for (int pc = 0; pc < 12; ++pc)
                 if (chord & (1 << pc))
                     weight[(std::size_t) pc] += beats;
+        }
 
         if (numHeld == 0 && latched)
         {
@@ -225,7 +231,9 @@ public:
     }
 
 private:
-    // Krumhansl-Kessler key profiles, correlated with how long each pitch class has sounded
+    // Krumhansl-Kessler key profiles, correlated with how long each pitch class has sounded.
+    // Holds on to the key it has unless another one clearly fits better, so a bar or two of
+    // a different chord doesn't flip it.
     void updateKey() noexcept
     {
         sinceKeyUpdate = 0.0;
@@ -235,7 +243,7 @@ private:
         if (total <= 0.0)
         {
             // Nothing has sounded for any time yet: guess from the first chord
-            if (! keyKnown && numHeld > 0)
+            if (numHeld > 0)
             {
                 key = root;
                 minor = (chord & (1 << follow::pitchClass (root + 3))) != 0;
@@ -260,7 +268,12 @@ private:
             return dw > 0.0 && dp > 0.0 ? num / std::sqrt (dw * dp) : -1.0;
         };
 
+        if (keyKnown && heardBeats < follow::kKeyMinBeats)
+            return;
+
         double best = -2.0;
+        int bestKey = key;
+        bool bestMinor = minor;
         for (int tonic = 0; tonic < 12; ++tonic)
         {
             for (bool isMinor : { false, true })
@@ -269,11 +282,15 @@ private:
                 if (r > best)
                 {
                     best = r;
-                    key = tonic;
-                    minor = isMinor;
+                    bestKey = tonic;
+                    bestMinor = isMinor;
                 }
             }
         }
+        if (keyKnown && best < correlate (minor ? minorProfile : major, key) + follow::kKeyMargin)
+            return;
+        key = bestKey;
+        minor = bestMinor;
         keyKnown = true;
     }
 
@@ -285,6 +302,7 @@ private:
     double silentBeats = 0.0;
 
     std::array<double, 12> weight {};
+    double heardBeats = 0.0;   // how long notes have been held, fading like the weights
     double sinceKeyUpdate = 0.0;
     bool keyKnown = false, minor = true;
     int key = 0;
