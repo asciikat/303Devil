@@ -284,6 +284,12 @@ void StepGrid::setRoll (int column, int ratchet)
 {
     auto s = proc.getPattern().get (column);
     s.ratchet = juce::jlimit (0, 3, ratchet);
+    // A roll needs a gated step that doesn't slide, so setting one switches the step on
+    if (s.ratchet > 0)
+    {
+        s.gate = true;
+        s.slide = false;
+    }
     proc.getPattern().set (column, s);
     repaint();
 }

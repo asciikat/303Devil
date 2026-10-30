@@ -305,6 +305,76 @@ int main (int argc, char** argv)
             return 1;
     }
 
+    // Clicking the ROLL row in the real editor cycles the step's roll
+    {
+        TB303AcidProcessor p;
+        p.selectPattern (0);
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
+
+        std::function<StepGrid* (juce::Component*)> findGrid = [&findGrid] (juce::Component* c) -> StepGrid*
+        {
+            if (auto* g = dynamic_cast<StepGrid*> (c))
+                return g;
+            for (auto* child : c->getChildren())
+                if (auto* g = findGrid (child))
+                    return g;
+            return nullptr;
+        };
+        auto* grid = findGrid (editor.get());
+        bool ok = grid != nullptr;
+        std::vector<int> seen;
+        if (ok)
+        {
+            const float columnWidth = (float) grid->getWidth() / (float) acid::kNumSteps;
+            const float x = columnWidth * 3.5f;   // step 4
+            // Find the ROLL row by clicking down the column: the last row of the grid
+            const float y = (float) grid->getHeight() - 10.0f;
+            auto& mouse = juce::Desktop::getInstance().getMainMouseSource();
+            auto event = [&] (juce::Component* c) {
+                return juce::MouseEvent (mouse, { x, y }, juce::ModifierKeys(), 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                         c, c, juce::Time::getCurrentTime(), { x, y }, juce::Time::getCurrentTime(), 1, false);
+            };
+            for (int click = 0; click < 5; ++click)
+            {
+                grid->mouseDown (event (grid));
+                grid->mouseUp (event (grid));
+                seen.push_back (p.getPattern().get (3).ratchet);
+            }
+            // 1, 2, 3, 0, 1: x2, x3, x4, off, x2. Step 4 of pattern 1 is a rest: a roll switches it on.
+            const auto step4 = p.getPattern().get (3);
+            ok = seen == std::vector<int> { 1, 2, 3, 0, 1 } && step4.gate && step4.hits() == 2;
+        }
+        std::printf ("roll row clicks cycle %d %d %d %d %d (grid %d x %d) -> %s\n", seen.size() > 0 ? seen[0] : -1,
+                     seen.size() > 1 ? seen[1] : -1, seen.size() > 2 ? seen[2] : -1, seen.size() > 3 ? seen[3] : -1,
+                     seen.size() > 4 ? seen[4] : -1, grid ? grid->getWidth() : 0, grid ? grid->getHeight() : 0,
+                     ok ? "ok" : "FAILED");
+        if (! ok)
+            return 1;
+    }
+
+    // The ROLL knob makes GENERATE and RANDOM write rolls, and at 0% they write none
+    {
+        auto countRolls = [] (float roll)
+        {
+            TB303AcidProcessor p;
+            p.selectPattern (0);
+            p.apvts.getParameter (pid::roll)->setValueNotifyingHost (roll);
+            int rolls = 0;
+            for (int round = 0; round < 20; ++round)
+            {
+                if (round % 2 == 0) p.generatePattern(); else p.randomizePattern();
+                for (int i = 0; i < acid::kNumSteps; ++i)
+                    rolls += p.getPattern().get (i).hits() > 1 ? 1 : 0;
+            }
+            return rolls;
+        };
+        const int none = countRolls (0.0f), some = countRolls (0.7f);
+        std::printf ("roll knob: 0%% wrote %d rolls, 70%% wrote %d in 20 patterns -> %s\n", none, some,
+                     none == 0 && some > 20 ? "ok" : "FAILED");
+        if (! (none == 0 && some > 20))
+            return 1;
+    }
+
     // Show an energy arc on the meter
     setParam (pid::energyArc, 2.0f);
     for (int i = 0; i < 4; ++i)
