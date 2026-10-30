@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 #include "PunkArt.h"
+#include "Presets.h"
 #include "dsp/FactoryGhosts.h"
 #include "dsp/Energy.h"
 
@@ -891,10 +892,30 @@ AcidPanel::AcidPanel (TB303AcidProcessor& p)
         addAndMakeVisible (b);
     }
 
-    for (int i = 0; i < proc.getNumPrograms(); ++i)
-        presetBox.addItem (proc.getProgramName (i), i + 1);
-    presetBox.setSelectedItemIndex (proc.getCurrentProgram(), juce::dontSendNotification);
-    presetBox.onChange = [this] { proc.choosePreset (presetBox.getSelectedItemIndex()); };
+    fillPresetBox();
+    presetBox.onChange = [this] { proc.choosePreset (presetBox.getText()); };
+    savePresetButton.setTooltip ("Save the current sound as your own preset");
+    savePresetButton.onClick = [this]
+    {
+        auto* window = new juce::AlertWindow ("Save preset", "Name for this sound:", juce::MessageBoxIconType::NoIcon);
+        window->addTextEditor ("name", proc.isFactoryPreset (proc.getCurrentPresetName()) ? juce::String() : proc.getCurrentPresetName());
+        window->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        window->enterModalState (true, juce::ModalCallbackFunction::create ([this, window] (int result)
+        {
+            if (result != 1)
+                return;
+            const auto name = window->getTextEditorContents ("name").trim();
+            if (! proc.saveUserPreset (name))
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Save preset",
+                                                        "Can't save that name. Use a different one (factory names are taken).");
+                return;
+            }
+            fillPresetBox();
+        }), true);
+    };
+    addAndMakeVisible (savePresetButton);
     addAndMakeVisible (presetBox);
 
     libraryBox.setTextWhenNothingSelected ("LOAD ACID PATTERN...");
@@ -961,6 +982,21 @@ void AcidPanel::applyTheme()
     followLabel.setColour (juce::Label::textColourId, shownAcid ? punk::colours::acidYellow : lnf.sectionText);
     sendLookAndFeelChange();
     repaint();
+}
+
+void AcidPanel::fillPresetBox()
+{
+    presetBox.clear (juce::dontSendNotification);
+    int id = 1;
+    for (const auto& preset : presets::kFactory)
+        presetBox.addItem (preset.name, id++);
+    if (const auto user = TB303AcidProcessor::getUserPresetNames(); user.size() > 0)
+    {
+        presetBox.addSeparator();
+        for (const auto& name : user)
+            presetBox.addItem (name, id++);
+    }
+    presetBox.setText (proc.getCurrentPresetName(), juce::dontSendNotification);
 }
 
 void AcidPanel::timerCallback()
@@ -1053,8 +1089,8 @@ void AcidPanel::syncControls()
     lockRhythmButton.setToggleState (proc.getLockRhythm(), juce::dontSendNotification);
     lockPitchButton.setToggleState (proc.getLockPitch(), juce::dontSendNotification);
 
-    if (presetBox.getSelectedItemIndex() != proc.getCurrentProgram())
-        presetBox.setSelectedItemIndex (proc.getCurrentProgram(), juce::dontSendNotification);
+    if (presetBox.getText() != proc.getCurrentPresetName())
+        presetBox.setText (proc.getCurrentPresetName(), juce::dontSendNotification);
 
     // Ghost Hands
     const auto& ghost = proc.getGhost();
@@ -1245,6 +1281,8 @@ void AcidPanel::resized()
         h.removeFromRight (8);
         waveButton.setBounds (h.removeFromRight (140).reduced (0, 4));
         h.removeFromRight (8);
+        savePresetButton.setBounds (h.removeFromRight (60).reduced (0, 6));
+        h.removeFromRight (4);
         presetBox.setBounds (h.removeFromRight (220).reduced (0, 6));
     }
     r.removeFromTop (8);

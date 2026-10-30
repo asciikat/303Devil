@@ -384,9 +384,39 @@ int main (int argc, char** argv)
             box->setSelectedItemIndex (5, juce::sendNotificationSync);
         p.removeListener (&watcher);
 
-        const bool ok = box != nullptr && p.getCurrentProgram() == 5 && watcher.programChanges > 0;
-        std::printf ("preset picked in the editor: program %d, host told %d times -> %s\n", p.getCurrentProgram(),
-                     watcher.programChanges, ok ? "ok" : "FAILED");
+        // the host must not see programs: it would keep its own and send the old one back
+        const bool ok = box != nullptr && p.getCurrentPresetName() == "Acid Screamer" && p.getNumPrograms() == 1
+                        && watcher.programChanges == 0;
+        std::printf ("preset picked in the editor: preset %s, programs %d -> %s\n", p.getCurrentPresetName().toRawUTF8(),
+                     p.getNumPrograms(), ok ? "ok" : "FAILED");
+        if (! ok)
+            return 1;
+    }
+
+    // Own presets: saved to the Presets folder, listed, reloaded, kept in the session, factory names refused
+    {
+        TB303AcidProcessor p;
+        auto set = [&p] (const char* id, float v) { if (auto* q = p.apvts.getParameter (id)) q->setValueNotifyingHost (q->convertTo0to1 (v)); };
+        set (pid::cutoff, 0.37f);
+        set (pid::distortion, 0.55f);
+        const bool saved = p.saveUserPreset ("zz snapshot test");
+        const bool refused = ! p.saveUserPreset ("Init 303");
+        set (pid::cutoff, 0.9f);
+        set (pid::distortion, 0.0f);
+        p.choosePreset ("Classic Squelch");
+        p.choosePreset ("zz snapshot test");
+        const bool restored = std::abs (p.apvts.getRawParameterValue (pid::cutoff)->load() - 0.37f) < 0.01f
+                              && std::abs (p.apvts.getRawParameterValue (pid::distortion)->load() - 0.55f) < 0.01f;
+        const bool listed = TB303AcidProcessor::getUserPresetNames().contains ("zz snapshot test");
+        juce::MemoryBlock state;
+        p.getStateInformation (state);
+        TB303AcidProcessor q;
+        q.setStateInformation (state.getData(), (int) state.getSize());
+        const bool kept = q.getCurrentPresetName() == "zz snapshot test";
+        TB303AcidProcessor::userPresetDir().getChildFile ("zz snapshot test.xml").deleteFile();
+        const bool ok = saved && refused && restored && listed && kept;
+        std::printf ("user presets: saved %d, factory name refused %d, restored %d, listed %d, in session %d -> %s\n",
+                     saved, refused, restored, listed, kept, ok ? "ok" : "FAILED");
         if (! ok)
             return 1;
     }
@@ -470,12 +500,8 @@ int main (int argc, char** argv)
         }
         const bool generated = gated >= 10 && arpNotes;
 
-        int preset = -1;
-        for (int i = 0; i < p.getNumPrograms(); ++i)
-            if (p.getProgramName (i) == "FOLLOW Acid Arp")
-                preset = i;
-        if (preset >= 0)
-            p.setCurrentProgram (preset);
+        int preset = 1;
+        p.choosePreset ("FOLLOW Acid Arp");
         const bool soundOnly = preset >= 0 && role != nullptr && role->getIndex() == 3 && mode != nullptr && mode->getIndex() == 4
                                && p.apvts.getRawParameterValue (pid::acid)->load() > 0.5f;
 

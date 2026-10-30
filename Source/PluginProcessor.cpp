@@ -6,6 +6,7 @@
 
 #include <cstring>
 #include <iterator>
+#include <map>
 
 namespace
 {
@@ -813,31 +814,78 @@ void TB303AcidProcessor::ghostLoaded()
 }
 
 //==============================================================================
+// Presets are our own list (factory + files the user saved), not the host's program list:
+// hosts keep their own idea of the current program and send the old one back.
 int TB303AcidProcessor::getNumPrograms()
 {
-    return presets::kNumFactory;
+    return 1;
 }
 
-const juce::String TB303AcidProcessor::getProgramName (int index)
+const juce::String TB303AcidProcessor::getProgramName (int)
 {
-    return juce::isPositiveAndBelow (index, presets::kNumFactory) ? presets::kFactory[index].name : "";
+    return {};
 }
 
-void TB303AcidProcessor::setCurrentProgram (int index)
+juce::File TB303AcidProcessor::userPresetDir()
 {
-    if (! juce::isPositiveAndBelow (index, presets::kNumFactory))
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+        .getChildFile ("TB-303 Devil Acid Rig").getChildFile ("Presets");
+}
+
+juce::StringArray TB303AcidProcessor::getUserPresetNames()
+{
+    juce::StringArray names;
+    for (const auto& f : userPresetDir().findChildFiles (juce::File::findFiles, false, "*.xml"))
+        names.add (f.getFileNameWithoutExtension());
+    names.sortNatural();
+    return names;
+}
+
+bool TB303AcidProcessor::isFactoryPreset (const juce::String& name)
+{
+    for (const auto& preset : presets::kFactory)
+        if (name.equalsIgnoreCase (preset.name))
+            return true;
+    return false;
+}
+
+void TB303AcidProcessor::choosePreset (const juce::String& name)
+{
+    std::map<juce::String, float> values;
+    bool found = false;
+
+    for (const auto& preset : presets::kFactory)
+        if (name == preset.name)
+        {
+            found = true;
+            for (const auto& v : preset.values)
+                if (v.id != nullptr)
+                    values[v.id] = v.value;
+        }
+
+    if (! found)
+    {
+        const auto file = userPresetDir().getChildFile (juce::File::createLegalFileName (name) + ".xml");
+        if (auto xml = juce::XmlDocument::parse (file); xml != nullptr && xml->hasTagName ("PRESET"))
+        {
+            found = true;
+            for (const char* id : presets::kSoundParams)
+                if (xml->hasAttribute (id))
+                    values[id] = (float) xml->getDoubleAttribute (id);
+        }
+    }
+
+    if (! found)
         return;
 
-    currentProgram = index;
-    const auto& preset = presets::kFactory[index];
+    currentPreset = name;
 
     for (const char* id : presets::kSoundParams)
     {
         auto* param = apvts.getParameter (id);
         float value = param->convertFrom0to1 (param->getDefaultValue());
-        for (const auto& v : preset.values)
-            if (v.id != nullptr && std::strcmp (v.id, id) == 0)
-                value = v.value;
+        if (auto it = values.find (id); it != values.end())
+            value = it->second;
 
         param->beginChangeGesture();
         param->setValueNotifyingHost (param->convertTo0to1 (value));
@@ -845,10 +893,28 @@ void TB303AcidProcessor::setCurrentProgram (int index)
     }
 }
 
-void TB303AcidProcessor::choosePreset (int index)
+bool TB303AcidProcessor::saveUserPreset (const juce::String& rawName)
 {
-    setCurrentProgram (index);
-    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
+    const auto name = rawName.trim();
+    if (name.isEmpty() || isFactoryPreset (name))
+        return false;
+
+    juce::XmlElement xml ("PRESET");
+    xml.setAttribute ("name", name);
+    for (const char* id : presets::kSoundParams)
+    {
+        auto* param = apvts.getParameter (id);
+        xml.setAttribute (id, (double) param->convertFrom0to1 (param->getValue()));
+    }
+
+    const auto dir = userPresetDir();
+    if (! dir.createDirectory().wasOk())
+        return false;
+    if (! xml.writeTo (dir.getChildFile (juce::File::createLegalFileName (name) + ".xml")))
+        return false;
+
+    currentPreset = name;
+    return true;
 }
 
 //==============================================================================
@@ -881,7 +947,7 @@ void TB303AcidProcessor::getStateInformation (juce::MemoryBlock& destData)
     if (auto ghostTree = createGhostTree(); ghostTree.isValid())
         state.appendChild (ghostTree, nullptr);
 
-    state.setProperty ("program", currentProgram, nullptr);
+    state.setProperty ("presetName", currentPreset, nullptr);
     state.setProperty ("lockRhythm", lockRhythm, nullptr);
     state.setProperty ("lockPitch", lockPitch, nullptr);
 
@@ -920,7 +986,10 @@ void TB303AcidProcessor::setStateInformation (const void* data, int sizeInBytes)
     if (auto ghostTree = tree.getChildWithName ("GHOST"); ghostTree.isValid())
         tree.removeChild (ghostTree, nullptr);
 
-    currentProgram = juce::jlimit (0, presets::kNumFactory - 1, (int) tree.getProperty ("program", 0));
+    if (tree.hasProperty ("presetName"))
+        currentPreset = tree.getProperty ("presetName").toString();
+    else   // sessions saved before user presets stored the factory index
+        currentPreset = presets::kFactory[juce::jlimit (0, presets::kNumFactory - 1, (int) tree.getProperty ("program", 0))].name;
     lockRhythm = (bool) tree.getProperty ("lockRhythm", false);
     lockPitch = (bool) tree.getProperty ("lockPitch", false);
     undoStack.clear();   // the restored bank replaces what the history was about

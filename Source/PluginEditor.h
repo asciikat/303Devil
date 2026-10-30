@@ -171,6 +171,7 @@ public:
 private:
     void timerCallback() override;
     void applyTheme();
+    void fillPresetBox();   // factory presets, then the user's own
     void renderBackground (juce::Graphics&);
     void syncControls();   // button states that follow parameters / processor state
     void ghostMenuChosen (int id);
@@ -185,7 +186,7 @@ private:
 
     std::vector<std::unique_ptr<Knob>> voiceKnobs, acidKnobs, fxKnobs, seqKnobs, cheatKnobs, ghostKnobs;
     juce::TextButton acidButton, waveButton, runButton, randomButton { "RANDOM" }, initButton { "INIT" },
-                     copyButton { "COPY" }, pasteButton { "PASTE" }, mutateButton { "MUTATE" },
+                     copyButton { "COPY" }, savePresetButton { "SAVE" }, pasteButton { "PASTE" }, mutateButton { "MUTATE" },
                      undoButton { "UNDO" }, redoButton { "REDO" },
                      lockRhythmButton { "LOCK RHYTHM" }, lockPitchButton { "LOCK PITCH" },
                      generateButton { "GENERATE" }, recButton { "REC" }, ghostButton, ghostModeButton,

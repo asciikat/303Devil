@@ -59,15 +59,19 @@ public:
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
 
-    // Factory sound presets (see Presets.h)
+    // Sound presets: factory (Presets.h) and the user's own, kept in our own list. Only one
+    // program is exposed, so the host has no preset list or Program parameter to send back.
     int getNumPrograms() override;
-    int getCurrentProgram() override { return currentProgram; }
-    void setCurrentProgram (int index) override;
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
     const juce::String getProgramName (int index) override;
     void changeProgramName (int, const juce::String&) override {}
-    // A preset picked in our own box: also tells the host, which otherwise keeps
-    // showing (and can send back) the old program
-    void choosePreset (int index);
+    void choosePreset (const juce::String& name);
+    const juce::String& getCurrentPresetName() const { return currentPreset; }
+    bool saveUserPreset (const juce::String& name);   // current sound -> Presets folder; false if name unusable
+    static juce::StringArray getUserPresetNames();
+    static bool isFactoryPreset (const juce::String& name);
+    static juce::File userPresetDir();
 
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
@@ -154,7 +158,7 @@ private:
     std::atomic<int> patternVersion { 0 };
     std::atomic<double> lastHostBpm { 0.0 };   // tempo the host last reported, 0 = none yet
     juce::Random random;
-    int currentProgram = 0;
+    juce::String currentPreset { "Init 303" };
     std::array<acid::Step, acid::kNumSteps> clipboard {};
     bool hasClipboard = false;
 
