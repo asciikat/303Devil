@@ -200,7 +200,8 @@ void Knob::setGhost (float value)
 //==============================================================================
 namespace
 {
-constexpr float kRowHeights[] = { 18.0f, 44.0f, 24.0f, 24.0f, 24.0f };
+constexpr float kRowHeights[] = { 18.0f, 44.0f, 24.0f, 24.0f, 24.0f, 24.0f };
+constexpr int kNumGridRows = (int) (sizeof (kRowHeights) / sizeof (kRowHeights[0]));
 constexpr float kRowGap = 4.0f;
 
 float rowTop (int row)
@@ -279,6 +280,14 @@ void StepGrid::setFlag (int column, int row, bool value)
     repaint();
 }
 
+void StepGrid::setRoll (int column, int ratchet)
+{
+    auto s = proc.getPattern().get (column);
+    s.ratchet = juce::jlimit (0, 3, ratchet);
+    proc.getPattern().set (column, s);
+    repaint();
+}
+
 void StepGrid::setNote (int column, int note)
 {
     auto s = proc.getPattern().get (column);
@@ -338,6 +347,18 @@ void StepGrid::paint (juce::Graphics& g)
         drawFlag (accentRow, s.accent, lnf.accentOn, "ACC");
         drawFlag (slideRow, s.slide, lnf.slideOn, "SLD");
 
+        // Roll: x2..x4 hits in the step. Dimmed when the step is a rest or slides, which can't roll.
+        {
+            const auto cell = cellBounds (i, rollRow);
+            const bool on = s.ratchet > 0;
+            const float live = s.hits() > 1 ? 1.0f : 0.35f;
+            g.setColour ((on ? lnf.ghost : lnf.cellOff).withAlpha (alpha * (on ? live : 1.0f)));
+            g.fillRoundedRectangle (cell, 3.0f);
+            g.setColour ((on ? juce::Colours::black : lnf.cellText.withAlpha (0.4f)).withMultipliedAlpha (alpha * (on ? live : 1.0f)));
+            g.setFont (uiFont (10.5f, true));
+            g.drawText (on ? "x" + juce::String (s.ratchet + 1) : juce::String ("ROLL"), cell, juce::Justification::centred, false);
+        }
+
         if (i == playing)
         {
             g.setColour (lnf.playHighlight);
@@ -366,11 +387,18 @@ void StepGrid::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    // Toggle, then drag across other steps to paint the same value
+    // Toggle, then drag across other steps to paint the same value. The roll row cycles
+    // x1 > x2 > x3 > x4 on each click and paints the new value across.
     drag = Drag::paint;
     paintRow = row;
-    paintValue = ! getFlag (s, row);
     lastPaintColumn = column;
+    if (row == rollRow)
+    {
+        paintRoll = (s.ratchet + 1) % 4;
+        setRoll (column, paintRoll);
+        return;
+    }
+    paintValue = ! getFlag (s, row);
     setFlag (column, row, paintValue);
 }
 
@@ -389,7 +417,10 @@ void StepGrid::mouseDrag (const juce::MouseEvent& e)
         while (column != lastPaintColumn)
         {
             lastPaintColumn += step;
-            setFlag (lastPaintColumn, paintRow, paintValue);
+            if (paintRow == rollRow)
+                setRoll (lastPaintColumn, paintRoll);
+            else
+                setFlag (lastPaintColumn, paintRow, paintValue);
         }
     }
 }
@@ -754,6 +785,7 @@ AcidPanel::AcidPanel (TB303AcidProcessor& p)
     addKnob (seqKnobs, pid::shuffle,   "SHUFFLE");
     addKnob (seqKnobs, pid::length,    "LENGTH");
     addKnob (seqKnobs, pid::accentVel, "ACC VEL");
+    addKnob (seqKnobs, pid::roll,      "ROLL");
 
     setupToggle (acidButton, pid::acid, acidAttachment);
     setupToggle (waveButton, pid::wave, waveAttachment);
@@ -1056,7 +1088,7 @@ void AcidPanel::paint (juce::Graphics& g)
 void AcidPanel::renderBackground (juce::Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat();
-    const juce::String seqHint ("drag or scroll notes, click to toggle, drag across steps to paint, double-click note = root");
+    const juce::String seqHint ("drag or scroll notes, click to toggle, drag across steps to paint, ROLL row cycles x2-x4, double-click note = root");
 
     if (! shownAcid)
     {
@@ -1302,7 +1334,7 @@ void AcidPanel::resized()
     midiBarsBox.setBounds (tools.removeFromLeft (80).reduced (2, 0));
 
     s.removeFromTop (6);
-    grid.setBounds (s.removeFromTop ((int) (rowTop (5) + 1.0f)));
+    grid.setBounds (s.removeFromTop ((int) (rowTop (kNumGridRows) + 1.0f)));
     s.removeFromTop (8);
 
     auto bottom = s;

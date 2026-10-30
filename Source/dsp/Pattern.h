@@ -18,6 +18,9 @@ struct Step
     bool gate   = true;  // false = rest
     bool accent = false;
     bool slide  = false; // hold the gate and glide into the next step (303 behaviour)
+    int  ratchet = 0;    // 0..3 = the step is played as 1..4 fast hits (a roll); ignored on slides and rests
+
+    int hits() const noexcept { return gate && ! slide ? ratchet + 1 : 1; }
 };
 
 // 16-step pattern shared by the GUI (writer) and the audio thread (reader).
@@ -38,7 +41,8 @@ public:
     }
 
     // Steps separated by spaces: "-" = rest, otherwise a semitone offset followed by
-    // optional 'a' (accent) and/or 's' (slide), e.g. "0a 12s 3 - -2as ..."
+    // optional 'a' (accent), 's' (slide) and/or 'r2'..'r4' (roll: that many hits in the step),
+    // e.g. "0a 12s 3 - -2as 7r4 ..."
     void loadFromString (const char* text) noexcept
     {
         clear();
@@ -65,8 +69,13 @@ public:
                 while (*p >= '0' && *p <= '9')
                     n = n * 10 + (*p++ - '0');
                 s.note = negative ? -n : n;
-                for (; *p == 'a' || *p == 's'; ++p)
-                    (*p == 'a' ? s.accent : s.slide) = true;
+                for (; *p == 'a' || *p == 's' || (*p == 'r' && p[1] >= '2' && p[1] <= '4'); ++p)
+                {
+                    if (*p == 'r')
+                        s.ratchet = *++p - '2' + 1;
+                    else
+                        (*p == 'a' ? s.accent : s.slide) = true;
+                }
             }
             set (i, s);
         }
@@ -79,12 +88,14 @@ private:
         return (uint32_t) (n + 128)
              | (s.gate   ? 1u << 8  : 0u)
              | (s.accent ? 1u << 9  : 0u)
-             | (s.slide  ? 1u << 10 : 0u);
+             | (s.slide  ? 1u << 10 : 0u)
+             | (uint32_t) (s.ratchet < 0 ? 0 : (s.ratchet > 3 ? 3 : s.ratchet)) << 11;
     }
 
     static Step unpack (uint32_t w) noexcept
     {
-        return { (int) (w & 0xffu) - 128, (w & (1u << 8)) != 0, (w & (1u << 9)) != 0, (w & (1u << 10)) != 0 };
+        return { (int) (w & 0xffu) - 128, (w & (1u << 8)) != 0, (w & (1u << 9)) != 0, (w & (1u << 10)) != 0,
+                 (int) ((w >> 11) & 3u) };
     }
 
     std::array<std::atomic<uint32_t>, kNumSteps> steps {};

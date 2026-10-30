@@ -65,4 +65,5 @@ inline constexpr const char* shuffle   = "shuffle";
 inline constexpr const char* length    = "length";
 inline constexpr const char* pattern   = "pattern";
 inline constexpr const char* accentVel = "accvel";
+inline constexpr const char* roll      = "roll";
 } // namespace pid

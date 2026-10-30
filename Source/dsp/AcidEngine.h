@@ -423,10 +423,12 @@ private:
             // glides in without retriggering the envelopes.
             const bool slideIn = contiguous && gateHigh && currentStepData.gate && currentStepData.slide;
 
+            currentHit = 0;
             if (step.gate)
             {
                 const int note = snapToScale (step.note, (Scale) params.scale);
-                voice.noteOn (std::clamp (params.root + note, 0, 127), step.accent, slideIn);
+                currentNote = std::clamp (params.root + note, 0, 127);
+                voice.noteOn (currentNote, step.accent, slideIn);
                 gateHigh = true;
             }
             else if (gateHigh)
@@ -440,7 +442,19 @@ private:
             lastAbsStep = absStep;
         }
 
-        if (gateHigh && ! currentStepData.slide && stepFrac >= kGateLength)
+        // A rolled step is played as several quick hits: the first keeps the step's accent,
+        // the rest are plain and each has its own half-length gate.
+        const int hits = currentStepData.hits();
+        const double scaled = stepFrac * hits;
+        const int hit = std::min (hits - 1, (int) scaled);
+        if (hit != currentHit)
+        {
+            currentHit = hit;
+            voice.noteOn (currentNote, false, false);
+            gateHigh = true;
+        }
+
+        if (gateHigh && ! currentStepData.slide && scaled - hit >= kGateLength)
         {
             voice.noteOff();
             gateHigh = false;
@@ -499,6 +513,7 @@ private:
     bool wasRunning = false, gateHigh = false;
     int64_t lastAbsStep = kNoStep;
     int currentStep = -1;
+    int currentHit = 0, currentNote = 0;   // which hit of a rolled step is playing, and its pitch
     int playingPattern = 0;
     Step currentStepData {};
 

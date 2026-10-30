@@ -72,7 +72,8 @@ public:
 
     // scale == off picks the style's own scale. energy 0.5 = the style as it is; higher
     // writes busier lines with more accents, slides and octave jumps.
-    void generate (Pattern& pattern, Style style, Scale scale, double energy = 0.5)
+    // roll 0..1 = how many steps get fast retriggers (x2..x4); 0 writes none
+    void generate (Pattern& pattern, Style style, Scale scale, double energy = 0.5, double roll = 0.0)
     {
         auto rules = rulesFor (style);
         const auto e = (float) (2.0 * (std::clamp (energy, 0.0, 1.0) - 0.5));
@@ -117,6 +118,8 @@ public:
         }
         ensureAtLeast (steps, 2, [] (Step& s) -> bool& { return s.accent; });
         ensureAtLeast (steps, 1, [] (Step& s) -> bool& { return s.slide; });
+
+        addRolls (steps, roll);
 
         for (int i = 0; i < kNumSteps; ++i)
             pattern.set (i, steps[(std::size_t) i]);
@@ -163,6 +166,28 @@ private:
         s.accent = s.gate && chance (accentChance);
         s.slide = s.gate && chance (r.slide);
         return s;
+    }
+
+    // Rolls land mostly on the last step of a beat and build towards the end of the bar, like a
+    // drummer's fill. The downbeat stays a single clean hit, and slides never roll.
+    void addRolls (std::array<Step, kNumSteps>& steps, double roll)
+    {
+        const auto amount = (float) std::clamp (roll, 0.0, 1.0);
+        if (amount <= 0.0f)
+            return;
+
+        for (int i = 1; i < kNumSteps; ++i)
+        {
+            auto& s = steps[(std::size_t) i];
+            if (! s.gate || s.slide)
+                continue;
+
+            float p = 0.5f * amount;
+            if (i % 4 == 3) p *= 1.8f;
+            if (i >= 12)    p *= 1.5f;
+            if (chance (std::min (p, 0.95f)))
+                s.ratchet = chance (0.75f - 0.4f * amount) ? 1 : (chance (0.5f) ? 2 : 3);
+        }
     }
 
     int pickNote (Scale scale)

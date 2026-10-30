@@ -56,7 +56,7 @@ private:
 };
 
 //==============================================================================
-// 16 columns: step number, note, gate, accent, slide
+// 16 columns: step number, note, gate, accent, slide, roll (hits per step)
 class StepGrid : public juce::Component
 {
 public:
@@ -71,7 +71,7 @@ public:
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
 private:
-    enum Row { numberRow, noteRow, gateRow, accentRow, slideRow, numRows };
+    enum Row { numberRow, noteRow, gateRow, accentRow, slideRow, rollRow, numRows };
     enum class Drag { none, note, paint };
 
     juce::Rectangle<float> cellBounds (int column, int row) const;
@@ -79,6 +79,7 @@ private:
     int rowAt (float y) const;
     void setNote (int column, int note);
     void setFlag (int column, int row, bool value);
+    void setRoll (int column, int ratchet);
     static bool getFlag (const acid::Step&, int row);
 
     TB303AcidProcessor& proc;
@@ -86,7 +87,7 @@ private:
 
     int shownVersion = -1, shownStep = -2, shownLength = -1, shownRoot = -1, shownPattern = -1;
     Drag drag = Drag::none;
-    int dragColumn = -1, dragStartNote = 0, paintRow = -1, lastPaintColumn = -1;
+    int dragColumn = -1, dragStartNote = 0, paintRow = -1, lastPaintColumn = -1, paintRoll = 0;
     float dragStartY = 0.0f;
     bool paintValue = false;
 };
@@ -226,7 +227,7 @@ private:
 class TB303AcidEditor : public juce::AudioProcessorEditor
 {
 public:
-    static constexpr int kDesignWidth = 1200, kDesignHeight = 956;
+    static constexpr int kDesignWidth = 1200, kDesignHeight = 996;
 
     explicit TB303AcidEditor (TB303AcidProcessor&);
 

@@ -116,6 +116,9 @@ inline Step energiseStep (Step s, int index, int64_t absStep, double e) noexcept
         {
             if (! s.accent && dice (2) < 0.35 * heat) s.accent = true;
             if (! s.slide && dice (3) < 0.25 * heat)  s.slide = true;
+            // Peak energy: the odd step rolls (x2, sometimes x3 or x4)
+            if (! s.slide && s.ratchet == 0 && dice (5) < 0.18 * heat)
+                s.ratchet = dice (6) < 0.6 ? 1 : (dice (7) < 0.5 ? 2 : 3);
         }
         else if (index % 2 == 1 && dice (4) < 0.4 * heat)
         {

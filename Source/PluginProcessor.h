@@ -140,12 +140,13 @@ private:
                            *squelch, *tweak, *tweakRate, *style, *scale,
                            *ghostPerform, *ghostAmount, *ghostVariation, *ghostLength, *ghostMode,
                            *energy, *energyArc,
-                           *source, *clock, *run, *bpm, *root, *shuffle, *length, *pattern, *accentVel;
+                           *source, *clock, *run, *bpm, *root, *shuffle, *length, *pattern, *accentVel, *roll;
     };
 
     RawParams raw {};
     acid::AcidEngine engine;
     std::atomic<int> patternVersion { 0 };
+    std::atomic<double> lastHostBpm { 0.0 };   // tempo the host last reported, 0 = none yet
     juce::Random random;
     int currentProgram = 0;
     std::array<acid::Step, acid::kNumSteps> clipboard {};

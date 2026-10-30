@@ -24,7 +24,8 @@ struct MidiExportSettings
 // Writes the pattern the way the engine plays it: 16th-note steps, shuffle on every second
 // step, a gate that is open for half a step, and slides that hold the note into the next one.
 // A slide into a different pitch overlaps the next note (legato, so a synth glides); a slide
-// into the same pitch is merged into one long note. Accents get velocity 127.
+// into the same pitch is merged into one long note. Accents get velocity 127. A rolled step
+// (ratchet) becomes that many short notes, with the accent on the first.
 inline juce::MidiFile buildPatternMidi (const Pattern& pattern, const MidiExportSettings& s)
 {
     constexpr int ppq = 960;
@@ -49,7 +50,10 @@ inline juce::MidiFile buildPatternMidi (const Pattern& pattern, const MidiExport
         const int start = eighthStart + (odd ? (int) std::lround (swing * (ppq / 2)) : 0);
         const int stepTicks = odd ? (ppq / 2) - (int) std::lround (swing * (ppq / 2))
                                   : (int) std::lround (swing * (ppq / 2));
-        const int end = start + (step.slide ? stepTicks : std::max (1, (int) std::lround (stepTicks * gateLength)));
+        // A rolled step is several equal hits, each with its own half-length gate
+        const int hits = step.hits();
+        const double hitTicks = (double) stepTicks / hits;
+        const int end = start + (step.slide ? stepTicks : std::max (1, (int) std::lround (hitTicks * gateLength)));
 
         if (! step.gate)
         {
@@ -72,6 +76,11 @@ inline juce::MidiFile buildPatternMidi (const Pattern& pattern, const MidiExport
         }
 
         notes.push_back ({ pitch, start, end, step.accent ? 127 : normalVelocity });
+        for (int k = 1; k < hits; ++k)
+        {
+            const int hitStart = start + (int) std::lround (k * hitTicks);
+            notes.push_back ({ pitch, hitStart, hitStart + std::max (1, (int) std::lround (hitTicks * gateLength)), normalVelocity });
+        }
         prevSlid = step.slide;
     }
 

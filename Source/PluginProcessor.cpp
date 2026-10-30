@@ -87,6 +87,7 @@ TB303AcidProcessor::TB303AcidProcessor()
     raw.length      = get (pid::length);
     raw.pattern     = get (pid::pattern);
     raw.accentVel   = get (pid::accentVel);
+    raw.roll        = get (pid::roll);
 
     startTimerHz (5);   // Ghost Hands learns on the message thread
 }
@@ -206,6 +207,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout TB303AcidProcessor::createPa
     layout.add (std::make_unique<AudioParameterInt> (ParameterID { pid::length, 1 }, "Pattern Length", 1, acid::kNumSteps, acid::kNumSteps));
     layout.add (std::make_unique<AudioParameterInt> (ParameterID { pid::pattern, 1 }, "Pattern", 1, acid::kNumPatterns, 1));
     layout.add (std::make_unique<AudioParameterInt> (ParameterID { pid::accentVel, 1 }, "Accent Velocity", 1, 127, 100));
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { pid::roll, 1 }, "Roll", NormalisableRange<float> (0.0f, 1.0f), 0.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction (percentText).withValueFromStringFunction (percentValue)));
 
     return layout;
 }
@@ -298,7 +302,10 @@ void TB303AcidProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         {
             transport.playing = pos->getIsPlaying();
             if (auto bpm = pos->getBpm())
+            {
                 transport.bpm = *bpm;
+                lastHostBpm.store (*bpm);
+            }
             if (auto ppq = pos->getPpqPosition())
             {
                 transport.ppq = *ppq;
@@ -370,7 +377,7 @@ bool TB303AcidProcessor::sameAsCurrent (const PatternSnapshot& s) const
     for (int i = 0; i < acid::kNumSteps; ++i)
     {
         const auto a = s.steps[(size_t) i], b = engine.patterns[(size_t) s.slot].get (i);
-        if (a.note != b.note || a.gate != b.gate || a.accent != b.accent || a.slide != b.slide)
+        if (a.note != b.note || a.gate != b.gate || a.accent != b.accent || a.slide != b.slide || a.ratchet != b.ratchet)
             return false;
     }
     return true;
@@ -396,6 +403,7 @@ void TB303AcidProcessor::applyLocks (const PatternSnapshot& before)
             s.gate = old.gate;
             s.accent = old.accent;
             s.slide = old.slide;
+            s.ratchet = old.ratchet;
         }
         if (lockPitch)
             s.note = old.note;
@@ -468,6 +476,8 @@ void TB303AcidProcessor::randomizePattern()
         s.note   = scale[random.nextInt (scaleSize)];
         s.accent = s.gate && random.nextFloat() < 0.3f;
         s.slide  = s.gate && random.nextFloat() < 0.28f;
+        if (s.gate && ! s.slide && i > 0 && random.nextFloat() < 0.5f * raw.roll->load() * (i % 4 == 3 ? 1.8f : 1.0f))
+            s.ratchet = random.nextFloat() < 0.65f ? 1 : 1 + random.nextInt (3);
         pattern.set (i, s);
     }
     applyLocks (pending);
@@ -496,7 +506,7 @@ void TB303AcidProcessor::generatePattern()
     beginPatternEdit();
     acid::AcidGenerator generator ((uint32_t) random.nextInt());
     generator.generate (getPattern(), (acid::Style) (int) raw.style->load(), (acid::Scale) (int) raw.scale->load(),
-                        uiEnergy.load());
+                        uiEnergy.load(), raw.roll->load());
     applyLocks (pending);
     patternEdited();
 }
@@ -513,7 +523,7 @@ void TB303AcidProcessor::mutatePattern()
         // With a lock on, only change the half that is still free
         std::vector<int> kinds;
         if (! lockPitch)  kinds.push_back (0);
-        if (! lockRhythm) kinds.insert (kinds.end(), { 1, 2, 3 });
+        if (! lockRhythm) kinds.insert (kinds.end(), { 1, 2, 3, 4 });
         if (kinds.empty())
             break;
 
@@ -524,6 +534,7 @@ void TB303AcidProcessor::mutatePattern()
             case 0:  s.note = scale[random.nextInt ((int) std::size (scale))]; s.gate = s.gate || ! lockRhythm; break;
             case 1:  s.accent = ! s.accent; break;
             case 2:  s.slide = ! s.slide; break;
+            case 4:  s.ratchet = s.gate && ! s.slide ? (s.ratchet + 1 + random.nextInt (3)) % 4 : 0; break;   // new roll
             default: s.gate = ! s.gate; break;
         }
         pattern.set (i, s);
@@ -565,7 +576,9 @@ juce::File TB303AcidProcessor::exportPatternMidi (int bars) const
     settings.root           = (int) raw.root->load();
     settings.length         = (int) raw.length->load();
     settings.scale          = (acid::Scale) (int) raw.scale->load();
-    settings.bpm            = raw.bpm->load();
+    // Follow the host's tempo when the plugin does, so the clip's tempo matches the project
+    const bool followsHost = (int) raw.clock->load() == acid::EngineParams::hostSync || (int) raw.source->load() == acid::EngineParams::midiInput;
+    settings.bpm            = followsHost && lastHostBpm.load() > 0.0 ? lastHostBpm.load() : (double) raw.bpm->load();
     settings.shuffle        = raw.shuffle->load();
     settings.accentVelocity = (int) raw.accentVel->load();
     settings.bars           = bars;
@@ -832,6 +845,7 @@ void TB303AcidProcessor::getStateInformation (juce::MemoryBlock& destData)
             step.setProperty ("gate", s.gate, nullptr);
             step.setProperty ("accent", s.accent, nullptr);
             step.setProperty ("slide", s.slide, nullptr);
+            step.setProperty ("ratchet", s.ratchet, nullptr);
             patternTree.appendChild (step, nullptr);
         }
         bank.appendChild (patternTree, nullptr);
@@ -869,7 +883,8 @@ void TB303AcidProcessor::setStateInformation (const void* data, int sizeInBytes)
                 engine.patterns[(size_t) p].set (i, { (int) step.getProperty ("note", 0),
                                                       (bool) step.getProperty ("gate", true),
                                                       (bool) step.getProperty ("accent", false),
-                                                      (bool) step.getProperty ("slide", false) });
+                                                      (bool) step.getProperty ("slide", false),
+                                                      juce::jlimit (0, 3, (int) step.getProperty ("ratchet", 0)) });
             }
         }
         tree.removeChild (bank, nullptr);

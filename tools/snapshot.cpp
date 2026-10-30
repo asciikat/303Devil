@@ -194,6 +194,7 @@ int main (int argc, char** argv)
             q.selectPattern (0);
             q.setLockRhythm (rhythm);
             q.setLockPitch (pitch);
+            q.apvts.getParameter (pid::roll)->setValueNotifyingHost (1.0f);   // rolls must be held too
             Steps base; for (int i = 0; i < acid::kNumSteps; ++i) base[(size_t) i] = q.getPattern().get (i);
             bool kept = true, changedFree = false;
             for (int round = 0; round < 40; ++round)
@@ -204,9 +205,9 @@ int main (int argc, char** argv)
                 for (int i = 0; i < acid::kNumSteps; ++i)
                 {
                     const auto s = q.getPattern().get (i), b = base[(size_t) i];
-                    if (rhythm && (s.gate != b.gate || s.accent != b.accent || s.slide != b.slide)) kept = false;
+                    if (rhythm && (s.gate != b.gate || s.accent != b.accent || s.slide != b.slide || s.ratchet != b.ratchet)) kept = false;
                     if (pitch && s.note != b.note) kept = false;
-                    if ((! rhythm && (s.gate != b.gate || s.accent != b.accent || s.slide != b.slide))
+                    if ((! rhythm && (s.gate != b.gate || s.accent != b.accent || s.slide != b.slide || s.ratchet != b.ratchet))
                         || (! pitch && s.note != b.note))
                         changedFree = true;
                 }
@@ -226,6 +227,81 @@ int main (int argc, char** argv)
         const bool persisted = restored.getLockRhythm() && ! restored.getLockPitch();
         std::printf ("locks saved with session -> %s\n", persisted ? "ok" : "FAILED");
         if (! (rhythmOk && pitchOk && bothOk && persisted))
+            return 1;
+    }
+
+    // Rolls (ratchets): a step with x4 fires four hits, and the text format, saving and MIDI export keep them
+    {
+        acid::Pattern text;
+        text.loadFromString ("7r4 0a - 3r2s 5as");
+        const auto s0 = text.get (0), s3 = text.get (3);
+        const bool parsed = s0.note == 7 && s0.ratchet == 3 && s0.hits() == 4
+                            && s3.ratchet == 1 && s3.slide && s3.hits() == 1 && text.get (1).accent && ! text.get (2).gate;
+
+        // Engine: 120 bpm free run = 5512 samples per step. Step 0 rolls x4, step 1 is plain, step 2 rolls but slides.
+        auto countHits = [] (acid::Step a, acid::Step b, acid::Step c)
+        {
+            acid::AcidEngine engine;
+            engine.prepare (44100.0);
+            acid::EngineParams p;
+            p.clock = acid::EngineParams::freeRun;
+            p.bpm = 120.0;
+            p.length = 3;
+            engine.patterns[0].set (0, a);
+            engine.patterns[0].set (1, b);
+            engine.patterns[0].set (2, c);
+            engine.setParams (p);
+            std::vector<float> out (64), outR (64);
+            int edges = 0;
+            bool was = false;
+            for (int done = 0; done < 3 * 5512 - 200; done += 64)
+            {
+                engine.render (out.data(), outR.data(), 64);
+                const bool on = engine.getVoice().isGateOn();
+                edges += on && ! was ? 1 : 0;
+                was = on;
+            }
+            return edges;
+        };
+        const int rolled = countHits ({ 0, true, false, false, 3 }, { 0, true, false, false, 0 }, { 0, false, false, false, 0 });
+        const int slid = countHits ({ 0, true, false, true, 3 }, { 0, true, false, false, 0 }, { 0, false, false, false, 0 });
+        const int rest = countHits ({ 0, false, false, false, 3 }, { 0, true, false, false, 0 }, { 0, false, false, false, 0 });
+
+        // Saved with the session, and exported as that many short notes
+        TB303AcidProcessor r;
+        r.selectPattern (0);
+        r.apvts.getParameter (pid::shuffle)->setValueNotifyingHost (0.0f);
+        r.apvts.getParameter (pid::scale)->setValueNotifyingHost (0.0f);
+        for (int i = 0; i < acid::kNumSteps; ++i)
+            r.getPattern().set (i, { 0, i == 0 || i == 4, false, false, i == 0 ? 3 : (i == 4 ? 1 : 0) });
+        juce::MemoryBlock saved;
+        r.getStateInformation (saved);
+        TB303AcidProcessor back;
+        back.setStateInformation (saved.getData(), (int) saved.getSize());
+        const bool persisted = back.getPattern().get (0).ratchet == 3 && back.getPattern().get (4).ratchet == 1;
+
+        juce::FileInputStream in (r.exportPatternMidi (1));
+        juce::MidiFile midi;
+        std::vector<int> starts, ends;
+        if (in.openedOk() && midi.readFrom (in) && midi.getNumTracks() == 1)
+            for (int i = 0; i < midi.getTrack (0)->getNumEvents(); ++i)
+            {
+                const auto* e = midi.getTrack (0)->getEventPointer (i);
+                if (e->message.isNoteOn() && e->noteOffObject != nullptr)
+                {
+                    starts.push_back ((int) e->message.getTimeStamp());
+                    ends.push_back ((int) e->noteOffObject->message.getTimeStamp());
+                }
+            }
+        const bool exported = starts == std::vector<int> { 0, 60, 120, 180, 960, 1080 }
+                              && ends == std::vector<int> { 30, 90, 150, 210, 1020, 1140 };
+
+        std::printf ("roll: parse %s, engine hits x4=%d slide=%d rest=%d, saved %s, midi %zu notes %s\n",
+                     parsed ? "ok" : "FAILED", rolled, slid, rest, persisted ? "ok" : "FAILED", starts.size(),
+                     exported ? "ok" : "FAILED");
+        // x4 + 1 plain = 5. A slide can't roll, and it holds the gate into step 1 (a glide, no retrigger), so 1.
+        // A rest can't roll, so only step 1's hit is left: 1.
+        if (! (parsed && rolled == 5 && slid == 1 && rest == 1 && persisted && exported))
             return 1;
     }
 
@@ -251,7 +327,7 @@ int main (int argc, char** argv)
     // must come back with the session
     {
         std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
-        editor->setSize (900, 717);
+        editor->setSize (900, 747);
         const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
         const auto file = dir.getChildFile ("gui_scaled_75.png");
         file.deleteFile();
@@ -263,7 +339,7 @@ int main (int argc, char** argv)
         editor.reset();
         processor.setStateInformation (saved.getData(), (int) saved.getSize());
         editor.reset (processor.createEditor());
-        const bool ok = editor->getWidth() == 900 && editor->getHeight() == 717;
+        const bool ok = editor->getWidth() == 900 && editor->getHeight() == 747;
         std::printf ("scaled window %dx%d after reload: %s\n", editor->getWidth(), editor->getHeight(), ok ? "ok" : "FAILED");
         if (! ok)
             return 1;
