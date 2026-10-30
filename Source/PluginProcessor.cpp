@@ -89,6 +89,8 @@ TB303AcidProcessor::TB303AcidProcessor()
     raw.accentVel   = get (pid::accentVel);
     raw.roll        = get (pid::roll);
     raw.role        = get (pid::role);
+    raw.arpMode     = get (pid::arpMode);
+    raw.arpOctaves  = get (pid::arpOctaves);
 
     startTimerHz (5);   // Ghost Hands learns on the message thread
 }
@@ -212,7 +214,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout TB303AcidProcessor::createPa
         ParameterID { pid::roll, 1 }, "Roll", NormalisableRange<float> (0.0f, 1.0f), 0.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction (percentText).withValueFromStringFunction (percentValue)));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { pid::role, 1 }, "Role",
-                                                        StringArray { "Driver", "Bass", "Overlay" }, 0));
+                                                        StringArray { "Driver", "Bass", "Overlay", "Arp" }, 0));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { pid::arpMode, 1 }, "Arp Mode",
+                                                        StringArray { "Up", "Down", "Up-Down", "Random", "Jump" }, 0));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { pid::arpOctaves, 1 }, "Arp Octaves",
+                                                        StringArray { "1 OCT", "2 OCT", "3 OCT" }, 1));
 
     return layout;
 }
@@ -263,6 +269,8 @@ acid::EngineParams TB303AcidProcessor::readParams() const noexcept
     e.pattern        = getSelectedPattern();
     e.accentVelocity = (int) raw.accentVel->load();
     e.role           = (int) raw.role->load();
+    e.arpMode        = (int) raw.arpMode->load();
+    e.arpOctaves     = (int) raw.arpOctaves->load() + 1;
     e.squelch       = raw.squelch->load();
     e.tweak          = raw.tweak->load();
     e.tweakBeats     = kTweakRateBeats[juce::jlimit (0, (int) std::size (kTweakRateBeats) - 1, (int) raw.tweakRate->load())];

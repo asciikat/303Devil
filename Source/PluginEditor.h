@@ -192,7 +192,7 @@ private:
                      clearGhostButton { "CLEAR" };
     std::array<juce::TextButton, acid::kNumPatterns> patternButtons;
     juce::ComboBox sourceBox, clockBox, presetBox, libraryBox, styleBox, scaleBox, ghostLengthBox, ghostMenu;
-    juce::ComboBox midiBarsBox, roleBox;
+    juce::ComboBox midiBarsBox, roleBox, arpModeBox, arpOctavesBox;
     MidiDragButton midiButton;
     juce::Label followLabel;   // what FOLLOW hears: key and chord
     std::unique_ptr<juce::FileChooser> fileChooser;
@@ -211,7 +211,7 @@ private:
                                                                           ghostAttachment, ghostModeAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> sourceAttachment, clockAttachment,
                                                                             styleAttachment, scaleAttachment, ghostLengthAttachment,
-                                                                            roleAttachment;
+                                                                            roleAttachment, arpModeAttachment, arpOctavesAttachment;
 
     juce::Rectangle<int> headerArea, voiceArea, acidArea, fxArea, seqArea, patternLabelArea,
                          cheatArea, styleLabelArea, scaleLabelArea, ghostArea, ghostLengthLabelArea,

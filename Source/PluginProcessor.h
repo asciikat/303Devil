@@ -145,7 +145,8 @@ private:
                            *squelch, *tweak, *tweakRate, *style, *scale,
                            *ghostPerform, *ghostAmount, *ghostVariation, *ghostLength, *ghostMode,
                            *energy, *energyArc,
-                           *source, *clock, *run, *bpm, *root, *shuffle, *length, *pattern, *accentVel, *roll, *role;
+                           *source, *clock, *run, *bpm, *root, *shuffle, *length, *pattern, *accentVel, *roll, *role,
+                           *arpMode, *arpOctaves;
     };
 
     RawParams raw {};

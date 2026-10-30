@@ -54,6 +54,8 @@ struct EngineParams
     int    pattern        = 0;      // requested bank slot; switches at the end of the playing pattern
     int    accentVelocity = 100;    // MIDI input: velocity at or above this = accent
     int    role           = 0;      // acid::Role: how followed notes are placed
+    int    arpMode        = 0;      // acid::ArpMode, for role Arp
+    int    arpOctaves     = 2;      // 1..3
 
     // Cheat panel
     double squelch    = 0.0;        // one-knob acid macro, 0..1
@@ -104,7 +106,10 @@ public:
             releaseAllMidiNotes();
         }
         if (p.source != params.source)
+        {
             harmony.reset();
+            arp.reset();
+        }
 
         params = p;
         voice.setParams (p.voice);
@@ -448,7 +453,9 @@ private:
             currentHit = 0;
             if (step.gate)
             {
-                if (params.source == EngineParams::followMidi)
+                if (params.source == EngineParams::followMidi && params.role == (int) Role::arp)
+                    currentNote = arp.next (harmony, step.note, params.root, (ArpMode) params.arpMode, params.arpOctaves, (Scale) params.scale);
+                else if (params.source == EngineParams::followMidi)
                     currentNote = harmony.noteFor (step.note, params.root, (Role) params.role, (Scale) params.scale);
                 else
                     currentNote = std::clamp (params.root + snapToScale (step.note, (Scale) params.scale), 0, 127);
@@ -491,6 +498,7 @@ private:
             voice.noteOff();
         gateHigh = false;
         wasRunning = false;
+        arp.reset();   // the arp starts from its first note when the sequencer does
         lastAbsStep = kNoStep;
         currentStep = -1;
         currentStepData = {};
@@ -520,6 +528,7 @@ private:
 
     Tb303Voice voice;
     FollowHarmony harmony;
+    FollowArp arp;
     PingPongDelay delay;
     Reverb reverb;
     double fxCoef = 0.0, delayMix = 0.0, reverbMix = 0.0;

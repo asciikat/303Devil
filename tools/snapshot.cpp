@@ -391,6 +391,91 @@ int main (int argc, char** argv)
             return 1;
     }
 
+    // ROLE Arp: its ARP mode and OCT settings are parameters saved with the session, the editor's
+    // two ARP boxes only work while ROLE is Arp, GENERATE writes an arp rhythm, and the
+    // FOLLOW Acid Arp preset only sets the sound
+    {
+        TB303AcidProcessor p;
+        auto set = [&p] (const char* id, float v) { if (auto* q = p.apvts.getParameter (id)) q->setValueNotifyingHost (q->convertTo0to1 (v)); };
+        auto choice = [] (TB303AcidProcessor& q, const char* id) { return dynamic_cast<juce::AudioParameterChoice*> (q.apvts.getParameter (id)); };
+        auto* role = choice (p, pid::role);
+        auto* mode = choice (p, pid::arpMode);
+        auto* octaves = choice (p, pid::arpOctaves);
+        const bool params = role != nullptr && mode != nullptr && octaves != nullptr && role->choices.size() == 4 && role->choices[3] == "Arp"
+                            && mode->choices.joinIntoString (",") == "Up,Down,Up-Down,Random,Jump" && mode->getIndex() == 0
+                            && octaves->choices.joinIntoString (",") == "1 OCT,2 OCT,3 OCT" && octaves->getIndex() == 1;
+
+        std::function<juce::ComboBox* (juce::Component*, const juce::String&)> findBox =
+            [&findBox] (juce::Component* c, const juce::String& firstItem) -> juce::ComboBox*
+        {
+            if (auto* box = dynamic_cast<juce::ComboBox*> (c); box != nullptr && box->getItemText (0) == firstItem)
+                return box;
+            for (auto* child : c->getChildren())
+                if (auto* box = findBox (child, firstItem))
+                    return box;
+            return nullptr;
+        };
+        bool offForDriver = false, onForArp = false, picked = false;
+        if (params)
+        {
+            set (pid::role, 0.0f);
+            std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
+            auto* modeBox = findBox (editor.get(), "Up");
+            auto* octBox = findBox (editor.get(), "1 OCT");
+            offForDriver = modeBox != nullptr && octBox != nullptr && ! modeBox->isEnabled() && ! octBox->isEnabled();
+            editor.reset();
+
+            set (pid::role, 3.0f);
+            editor.reset (p.createEditor());
+            modeBox = findBox (editor.get(), "Up");
+            octBox = findBox (editor.get(), "1 OCT");
+            onForArp = modeBox != nullptr && octBox != nullptr && modeBox->isEnabled() && octBox->isEnabled();
+            if (onForArp)
+            {
+                modeBox->setSelectedItemIndex (4, juce::sendNotificationSync);   // Jump
+                octBox->setSelectedItemIndex (2, juce::sendNotificationSync);    // 3 OCT
+                picked = mode->getIndex() == 4 && octaves->getIndex() == 2;
+            }
+        }
+
+        juce::MemoryBlock saved;
+        p.getStateInformation (saved);
+        TB303AcidProcessor back;
+        back.setStateInformation (saved.getData(), (int) saved.getSize());
+        auto* backRole = choice (back, pid::role);
+        auto* backMode = choice (back, pid::arpMode);
+        auto* backOct = choice (back, pid::arpOctaves);
+        const bool kept = backRole != nullptr && backMode != nullptr && backOct != nullptr
+                          && backRole->getIndex() == 3 && backMode->getIndex() == 4 && backOct->getIndex() == 2;
+
+        p.selectPattern (0);
+        p.generatePattern();
+        int gated = 0;
+        bool arpNotes = true;
+        for (int i = 0; i < acid::kNumSteps; ++i)
+        {
+            const auto s = p.getPattern().get (i);
+            gated += s.gate ? 1 : 0;
+            arpNotes &= ! s.gate || s.note == 0 || s.note == 12;
+        }
+        const bool generated = gated >= 10 && arpNotes;
+
+        int preset = -1;
+        for (int i = 0; i < p.getNumPrograms(); ++i)
+            if (p.getProgramName (i) == "FOLLOW Acid Arp")
+                preset = i;
+        if (preset >= 0)
+            p.setCurrentProgram (preset);
+        const bool soundOnly = preset >= 0 && role != nullptr && role->getIndex() == 3 && mode != nullptr && mode->getIndex() == 4
+                               && p.apvts.getRawParameterValue (pid::acid)->load() > 0.5f;
+
+        const bool ok = params && offForDriver && onForArp && picked && kept && generated && soundOnly;
+        std::printf ("arp role: params %d, boxes off for Driver %d, on for Arp %d, picked %d, saved %d, generate %d (%d steps), preset %d -> %s\n",
+                     params, offForDriver, onForArp, picked, kept, generated, gated, preset, ok ? "ok" : "FAILED");
+        if (! ok)
+            return 1;
+    }
+
     // The ROLL knob makes GENERATE and RANDOM write rolls, and at 0% they write none
     {
         auto countRolls = [] (float roll)
@@ -452,7 +537,7 @@ int main (int argc, char** argv)
     // Show an energy arc on the meter, and FOLLOW hearing an Ab chord in C minor
     setParam (pid::energyArc, 2.0f);
     setParam (pid::source, 2.0f);
-    setParam (pid::role, 1.0f);
+    setParam (pid::role, 3.0f);   // Arp, so the PNGs show the ARP boxes lit
     for (int n : { 48, 60, 63, 67 })
         midi.addEvent (juce::MidiMessage::noteOn (1, n, (juce::uint8) 100), 0);
     for (int i = 0; i < 64; ++i)

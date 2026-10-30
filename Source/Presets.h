@@ -129,7 +129,7 @@ inline constexpr Preset kFactory[] = {
           { pid::sub, 0.40f }, { pid::delayMix, 0.28f }, { pid::delayTime, 2.0f }, { pid::reverbMix, 0.22f },
           { pid::pump, 0.35f }, { pid::squelch, 0.40f }, { pid::tweak, 0.80f }, { pid::tweakRate, 0.0f } } } },
 
-    // Sounds for FOLLOW (set ROLE to match): a bass under the kick, and a quiet line on top
+    // Sounds for FOLLOW (set ROLE to match): a bass under the kick, a quiet line on top, and an arp
     { "FOLLOW Acid Bass",
       { { { pid::acid, 1.0f }, { pid::cutoff, 0.20f }, { pid::resonance, 0.72f }, { pid::envMod, 0.50f },
           { pid::decay, 0.28f }, { pid::accent, 0.75f }, { pid::overdrive, 0.30f }, { pid::distortion, 0.20f },
@@ -141,6 +141,12 @@ inline constexpr Preset kFactory[] = {
           { pid::muffler, 0.40f }, { pid::sub, 0.0f }, { pid::slideTime, 90.0f }, { pid::delayMix, 0.30f },
           { pid::delayTime, 2.0f }, { pid::delayFeedback, 0.55f }, { pid::reverbMix, 0.28f }, { pid::reverbSize, 0.80f },
           { pid::lfoDepth, 0.35f }, { pid::lfoRate, 4.0f }, { pid::volume, -10.0f } } } },
+    { "FOLLOW Acid Arp",
+      { { { pid::acid, 1.0f }, { pid::cutoff, 0.30f }, { pid::resonance, 0.88f }, { pid::envMod, 0.62f },
+          { pid::decay, 0.34f }, { pid::accent, 0.80f }, { pid::overdrive, 0.30f }, { pid::distortion, 0.25f },
+          { pid::muffler, 0.30f }, { pid::sub, 0.15f }, { pid::slideTime, 70.0f }, { pid::delayMix, 0.24f },
+          { pid::delayTime, 2.0f }, { pid::delayFeedback, 0.50f }, { pid::reverbMix, 0.16f }, { pid::lfoDepth, 0.30f },
+          { pid::lfoRate, 4.0f }, { pid::tweak, 0.25f }, { pid::tweakRate, 2.0f } } } },
 };
 
 inline constexpr int kNumFactory = (int) (sizeof (kFactory) / sizeof (kFactory[0]));

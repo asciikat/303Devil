@@ -65,8 +65,9 @@ inline int snapToScale (int note, Scale s)
 //==============================================================================
 enum class Style { classic, hard, hypnotic, minimal, dark, rave };
 
-// What the line is for: the main acid (driver), a bass under the track, or a gentle overlay
-enum class Role { driver, bass, overlay };
+// What the line is for: the main acid (driver), a bass under the track, a gentle overlay, or an
+// arp of the chord being followed
+enum class Role { driver, bass, overlay, arp };
 
 class AcidGenerator
 {
@@ -76,7 +77,7 @@ public:
     // scale == off picks the style's own scale. energy 0.5 = the style as it is; higher
     // writes busier lines with more accents, slides and octave jumps.
     // roll 0..1 = how many steps get fast retriggers (x2..x4); 0 writes none
-    // role: driver = the style's acid line; bass and overlay have their own writers (style unused)
+    // role: driver = the style's acid line; bass, overlay and arp have their own writers (style unused)
     void generate (Pattern& pattern, Style style, Scale scale, double energy = 0.5, double roll = 0.0, Role role = Role::driver)
     {
         if (role != Role::driver)
@@ -87,6 +88,8 @@ public:
             const auto e = (float) (2.0 * (std::clamp (energy, 0.0, 1.0) - 0.5));
             if (role == Role::bass)
                 writeBass (steps, e);
+            else if (role == Role::arp)
+                writeArp (steps, e);
             else
                 writeOverlay (steps, e);
             addRolls (steps, roll);
@@ -293,6 +296,53 @@ private:
             auto& s = steps[(std::size_t) next (kNumSteps)];
             if (! s.gate) { s = { walk(), true, false, false }; ++gated; }
         }
+    }
+
+    // Arp rhythm: the chord gives the notes, so this is the groove. Most steps play, the
+    // downbeat is accented with a few more accents on the off-beat 8ths, a quarter of the steps
+    // slide (the 303 winding between chord notes), and the odd note jumps an octave (12).
+    // Eight steps are written and answered with two changes. e = energy, -1..1.
+    void writeArp (std::array<Step, kNumSteps>& steps, float e)
+    {
+        const float density = std::clamp (0.8f + 0.12f * e, 0.65f, 0.95f);
+        auto makeArpStep = [&] (int i)
+        {
+            Step s { 0, i == 0 || chance (density), false, false };
+            s.accent = s.gate && (i == 0 || chance (i % 4 == 2 ? 0.35f : 0.12f));
+            s.slide = s.gate && chance (0.25f);
+            s.note = s.gate && chance (0.12f + 0.06f * e) ? 12 : 0;
+            return s;
+        };
+        for (int i = 0; i < 8; ++i)
+            steps[(std::size_t) i] = makeArpStep (i);
+        for (int i = 8; i < kNumSteps; ++i)
+            steps[(std::size_t) i] = steps[(std::size_t) (i - 8)];
+        for (int c = 0; c < 2; ++c)
+        {
+            const int i = 9 + next (7);
+            steps[(std::size_t) i] = makeArpStep (i);
+        }
+
+        // Busy: at least 10 of the 16 steps play, never more than two rests in a row
+        int gated = 0;
+        for (auto& s : steps)
+            gated += s.gate ? 1 : 0;
+        for (int tries = 0; gated < 10 && tries < 64; ++tries)
+        {
+            auto& s = steps[(std::size_t) next (kNumSteps)];
+            if (! s.gate) { s = { 0, true, false, false }; ++gated; }
+        }
+        for (int i = 0, rests = 0; i < kNumSteps; ++i)
+        {
+            rests = steps[(std::size_t) i].gate ? 0 : rests + 1;
+            if (rests > 2)
+            {
+                steps[(std::size_t) i] = { 0, true, false, false };
+                rests = 0;
+            }
+        }
+        ensureAtLeast (steps, 2, [] (Step& s) -> bool& { return s.accent; });
+        ensureAtLeast (steps, 1, [] (Step& s) -> bool& { return s.slide; });
     }
 
     int pickNote (Scale scale)

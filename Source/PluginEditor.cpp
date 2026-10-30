@@ -869,7 +869,12 @@ AcidPanel::AcidPanel (TB303AcidProcessor& p)
     // Role: what GENERATE writes, and where Follow MIDI puts it
     setupCombo (roleBox, pid::role, roleAttachment);
     roleBox.setTooltip ("Driver = the main acid line. Bass = rolling 16ths on the chord root. Overlay = a sparse line up high. "
+                        "Arp = the chord being followed, note by note on the grid's rhythm. "
                         "Sets what GENERATE writes; with SOURCE on Follow MIDI it also sets how the notes follow the chords");
+    setupCombo (arpModeBox, pid::arpMode, arpModeAttachment);
+    arpModeBox.setTooltip ("ROLE Arp: the order the chord's notes are played in. Jump = each note, then the same note an octave up");
+    setupCombo (arpOctavesBox, pid::arpOctaves, arpOctavesAttachment);
+    arpOctavesBox.setTooltip ("ROLE Arp: how many octaves the arp climbs. A step's note in the grid moves its arp note by octaves (12 = up one)");
     followLabel.setFont (uiFont (12.0f, true));
     followLabel.setJustificationType (juce::Justification::centredLeft);
     followLabel.setInterceptsMouseClicks (false, false);
@@ -1018,6 +1023,14 @@ void AcidPanel::syncControls()
     const juce::String followText = following ? "FOLLOW:  " + juce::String (acid::follow::describe (proc.uiFollowKey.load(), proc.uiFollowChord.load()))
                                               : juce::String();
     followLabel.setText (followText, juce::dontSendNotification);   // repaints only when it changes
+
+    // The ARP boxes only do something with ROLE on Arp
+    const bool arp = (int) proc.apvts.getRawParameterValue (pid::role)->load() == (int) acid::Role::arp;
+    for (auto* box : { &arpModeBox, &arpOctavesBox })
+    {
+        box->setEnabled (arp);
+        box->setAlpha (arp ? 1.0f : 0.4f);
+    }
 
     // Selected slot is lit; the slot actually playing (if different) is marked with dots
     const int selected = proc.getSelectedPattern();
@@ -1359,7 +1372,10 @@ void AcidPanel::resized()
     midiBarsBox.setBounds (tools.removeFromLeft (80).reduced (2, 0));
     tools.removeFromLeft (16);
     roleLabelArea = tools.removeFromLeft (40);
-    roleBox.setBounds (tools.removeFromLeft (110).reduced (2, 0));
+    roleBox.setBounds (tools.removeFromLeft (92).reduced (2, 0));
+    tools.removeFromLeft (4);
+    arpModeBox.setBounds (tools.removeFromLeft (92).reduced (2, 0));
+    arpOctavesBox.setBounds (tools.removeFromLeft (70).reduced (2, 0));
     tools.removeFromLeft (12);
     followLabel.setBounds (tools);
 

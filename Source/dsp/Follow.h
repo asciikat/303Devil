@@ -20,6 +20,7 @@ inline constexpr double kKeyMinBeats   = 16.0;   // the first chord's guess stan
 inline constexpr double kKeyMargin     = 0.1;    // another key must fit this much better (correlation) to take over
 inline constexpr int    kMajorScale    = 0b101010110101;   // 0 2 4 5 7 9 11
 inline constexpr int    kMinorScale    = 0b010110101101;   // 0 2 3 5 7 8 10
+inline constexpr int    kArpMaxOctaves = 3;
 
 inline int rotate (int mask, int by) noexcept
 {
@@ -201,6 +202,10 @@ public:
     }
 
     bool hasChord() const noexcept  { return latched; }
+    bool heardAnything() const noexcept { return keyKnown || latched; }
+    // What to play over once something has been heard: the held / latched chord, else the key's tonic triad
+    int activeChord() const noexcept { return latched ? chord : follow::rotate (minor ? 0b10001001 : 0b10010001, key); }
+    int activeRoot() const noexcept  { return latched ? root : key; }
     int chordMask() const noexcept  { return chord; }
     int chordRoot() const noexcept  { return root; }
     bool hasKey() const noexcept    { return keyKnown; }
@@ -215,14 +220,13 @@ public:
     // that don't rub a semitone against the chord; the bass takes chord tones only.
     int noteFor (int offset, int home, Role role, Scale fallbackScale) const noexcept
     {
-        if (! keyKnown && ! latched)
+        if (! heardAnything())
             return home + snapToScale (offset, fallbackScale);
 
         const int keyPc = keyKnown ? key : follow::pitchClass (home);
         const int scale = keyKnown ? follow::rotate (minor ? follow::kMinorScale : follow::kMajorScale, key)
                                    : follow::rotate (follow::scaleMask (fallbackScale), keyPc);
-        const int chordNow = latched ? chord : follow::rotate (minor ? 0b10001001 : 0b10010001, keyPc);   // tonic triad
-        const int rootPc = latched ? root : keyPc;
+        const int chordNow = activeChord(), rootPc = activeRoot();
 
         const int rub = follow::rotate (chordNow, 1) | follow::rotate (chordNow, -1);
         const int allowed = role == Role::bass ? chordNow : (chordNow | (scale & ~rub));
@@ -306,5 +310,93 @@ private:
     double sinceKeyUpdate = 0.0;
     bool keyKnown = false, minor = true;
     int key = 0;
+};
+
+// The order ROLE Arp plays a chord's notes in. Jump plays each note, then the same note an octave up.
+enum class ArpMode { up, down, upDown, random, jump };
+
+// ROLE Arp: each sounding step of the pattern plays the next note of the chord being heard.
+// The grid keeps the rhythm, accents and slides; a step's note only moves its arp note to the
+// nearest octave. Starts again from its first note on a new chord, mode or octave range.
+class FollowArp
+{
+public:
+    void reset() noexcept { *this = {}; }
+
+    // offset = the step's note, home = the Root Note. Before anything has been heard this is
+    // the internal sequencer's note.
+    int next (const FollowHarmony& h, int offset, int home, ArpMode mode, int octaves, Scale fallbackScale) noexcept
+    {
+        if (! h.heardAnything())
+            return home + snapToScale (offset, fallbackScale);
+
+        octaves = std::clamp (octaves, 1, follow::kArpMaxOctaves);
+        const int chord = h.activeChord(), root = h.activeRoot();
+        const int what = chord | root << 12 | (int) mode << 16 | octaves << 20;
+        if (what != playing)
+        {
+            playing = what;
+            pos = 0;
+            lastIndex = -1;
+        }
+
+        // The chord's notes from its root nearest home, up through the octaves
+        std::array<int, 12 * follow::kArpMaxOctaves> tones {};
+        int n = 0;
+        const int base = follow::nearestWithClass (home, root);
+        for (int o = 0; o < octaves; ++o)
+            for (int i = 0; i < 12; ++i)
+                if (chord & (1 << follow::pitchClass (root + i)))
+                    tones[(std::size_t) n++] = base + 12 * o + i;
+        if (n == 0)
+            return home + snapToScale (offset, fallbackScale);
+
+        int note = tones[0];
+        switch (mode)
+        {
+            case ArpMode::up:     note = tones[(std::size_t) (pos % n)]; break;
+            case ArpMode::down:   note = tones[(std::size_t) (n - 1 - pos % n)]; break;
+            case ArpMode::upDown:
+            {
+                const int cycle = n > 1 ? 2 * n - 2 : 1, k = pos % cycle;
+                note = tones[(std::size_t) (k < n ? k : cycle - k)];
+                break;
+            }
+            case ArpMode::random:
+            {
+                // Any note but the last one
+                int k = lastIndex < 0 || n == 1 ? (int) (nextRandom() % (uint32_t) n) : (int) (nextRandom() % (uint32_t) (n - 1));
+                if (lastIndex >= 0 && n > 1 && k >= lastIndex)
+                    ++k;
+                lastIndex = k;
+                note = tones[(std::size_t) k];
+                break;
+            }
+            case ArpMode::jump:
+            {
+                const int k = pos % (2 * n);
+                note = tones[(std::size_t) (k / 2)] + 12 * (k % 2);
+                break;
+            }
+        }
+        ++pos;
+
+        // The grid's note picks the octave: -6..5 as is, 6..17 up one, -18..-7 down one
+        const int octave = (offset + 6 >= 0 ? offset + 6 : offset + 6 - 11) / 12;
+        return std::clamp (note + 12 * octave, 0, 127);
+    }
+
+private:
+    uint32_t nextRandom() noexcept
+    {
+        rng ^= rng << 13;
+        rng ^= rng >> 17;
+        rng ^= rng << 5;
+        return rng >> 8;
+    }
+
+    int playing = -1;   // the chord, mode and range the arp is on
+    int pos = 0, lastIndex = -1;
+    uint32_t rng = 0x303a7b9u;
 };
 } // namespace acid
