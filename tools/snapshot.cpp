@@ -354,6 +354,43 @@ int main (int argc, char** argv)
             return 1;
     }
 
+    // Picking a preset in the plugin's own box must tell the host which program is on,
+    // or REAPER keeps showing Init 303 and can send that program back later
+    {
+        struct ProgramWatcher : juce::AudioProcessorListener
+        {
+            int programChanges = 0;
+            void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override {}
+            void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails& details) override
+            {
+                programChanges += details.programChanged ? 1 : 0;
+            }
+        } watcher;
+
+        TB303AcidProcessor p;
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditor());
+        std::function<juce::ComboBox* (juce::Component*)> findPresetBox = [&findPresetBox] (juce::Component* c) -> juce::ComboBox*
+        {
+            if (auto* box = dynamic_cast<juce::ComboBox*> (c); box != nullptr && box->getItemText (0) == "Init 303")
+                return box;
+            for (auto* child : c->getChildren())
+                if (auto* box = findPresetBox (child))
+                    return box;
+            return nullptr;
+        };
+        auto* box = findPresetBox (editor.get());
+        p.addListener (&watcher);
+        if (box != nullptr)
+            box->setSelectedItemIndex (5, juce::sendNotificationSync);
+        p.removeListener (&watcher);
+
+        const bool ok = box != nullptr && p.getCurrentProgram() == 5 && watcher.programChanges > 0;
+        std::printf ("preset picked in the editor: program %d, host told %d times -> %s\n", p.getCurrentProgram(),
+                     watcher.programChanges, ok ? "ok" : "FAILED");
+        if (! ok)
+            return 1;
+    }
+
     // The ROLL knob makes GENERATE and RANDOM write rolls, and at 0% they write none
     {
         auto countRolls = [] (float roll)

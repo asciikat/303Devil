@@ -833,6 +833,12 @@ void TB303AcidProcessor::setCurrentProgram (int index)
     }
 }
 
+void TB303AcidProcessor::choosePreset (int index)
+{
+    setCurrentProgram (index);
+    updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withProgramChanged (true));
+}
+
 //==============================================================================
 void TB303AcidProcessor::getStateInformation (juce::MemoryBlock& destData)
 {

@@ -65,6 +65,9 @@ public:
     void setCurrentProgram (int index) override;
     const juce::String getProgramName (int index) override;
     void changeProgramName (int, const juce::String&) override {}
+    // A preset picked in our own box: also tells the host, which otherwise keeps
+    // showing (and can send back) the old program
+    void choosePreset (int index);
 
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;

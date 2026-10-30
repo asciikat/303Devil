@@ -886,7 +886,7 @@ AcidPanel::AcidPanel (TB303AcidProcessor& p)
     for (int i = 0; i < proc.getNumPrograms(); ++i)
         presetBox.addItem (proc.getProgramName (i), i + 1);
     presetBox.setSelectedItemIndex (proc.getCurrentProgram(), juce::dontSendNotification);
-    presetBox.onChange = [this] { proc.setCurrentProgram (presetBox.getSelectedItemIndex()); };
+    presetBox.onChange = [this] { proc.choosePreset (presetBox.getSelectedItemIndex()); };
     addAndMakeVisible (presetBox);
 
     libraryBox.setTextWhenNothingSelected ("LOAD ACID PATTERN...");
