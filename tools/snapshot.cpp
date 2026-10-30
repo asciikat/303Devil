@@ -101,6 +101,53 @@ int main (int argc, char** argv)
                          && factory.getGhost().getMoveTypes() >= 2 ? "ok" : "FAILED");
     }
 
+    // MIDI export: factory pattern 1 ("0a 12s 3 - -2a 5s 7 - 0a 10s 3 - 12a 7s 3 -") at the default
+    // root, no swing, no scale lock, read back from the file the drag button would hand to a host
+    {
+        TB303AcidProcessor exporter;
+        auto setExporterParam = [&exporter] (const char* id, float value)
+        {
+            auto* param = exporter.apvts.getParameter (id);
+            param->setValueNotifyingHost (param->convertTo0to1 (value));
+        };
+        setExporterParam (pid::shuffle, 0.0f);
+        setExporterParam (pid::scale, 0.0f);
+        exporter.selectPattern (0);
+
+        const int root = (int) exporter.apvts.getRawParameterValue (pid::root)->load();
+        const auto file = exporter.exportPatternMidi (4);
+        juce::FileInputStream in (file);
+        juce::MidiFile midi;
+        const bool read = in.openedOk() && midi.readFrom (in);
+
+        struct Held { int pitch, start, end, velocity; };
+        std::vector<Held> notes;
+        int lastTick = 0;
+        if (read && midi.getNumTracks() == 1)
+        {
+            const auto* track = midi.getTrack (0);
+            for (int i = 0; i < track->getNumEvents(); ++i)
+            {
+                const auto* e = track->getEventPointer (i);
+                lastTick = (int) e->message.getTimeStamp();
+                if (e->message.isNoteOn() && e->noteOffObject != nullptr)
+                    notes.push_back ({ e->message.getNoteNumber(), (int) e->message.getTimeStamp(),
+                                       (int) e->noteOffObject->message.getTimeStamp(), e->message.getVelocity() });
+            }
+        }
+
+        // 12 gated steps per bar. The slide on step 2 (12s) runs into a different pitch, so it
+        // overlaps the next note by 24 ticks; the plain steps close after half a step.
+        const bool ok = read && midi.getTimeFormat() == 960 && notes.size() == 48 && lastTick == 4 * 3840
+                        && notes[0].pitch == root && notes[0].start == 0 && notes[0].end == 120 && notes[0].velocity == 127
+                        && notes[1].pitch == root + 12 && notes[1].start == 240 && notes[1].end == 504 && notes[1].velocity < 100
+                        && notes[2].pitch == root + 3 && notes[2].start == 480
+                        && notes[12].pitch == root && notes[12].start == 3840;
+        std::printf ("midi export: %zu notes over %d ticks -> %s\n", notes.size(), lastTick, ok ? "ok" : "FAILED");
+        if (! ok)
+            return 1;
+    }
+
     // Show an energy arc on the meter
     setParam (pid::energyArc, 2.0f);
     for (int i = 0; i < 4; ++i)

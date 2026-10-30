@@ -142,6 +142,22 @@ private:
 };
 
 //==============================================================================
+// Drag this onto a track in the host (or a folder) to drop the selected pattern as a MIDI clip
+class MidiDragButton : public juce::TextButton
+{
+public:
+    MidiDragButton (TB303AcidProcessor&, const juce::ComboBox& barsBox);
+
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+
+private:
+    TB303AcidProcessor& proc;
+    const juce::ComboBox& bars;
+    bool dragStarted = false;
+};
+
+//==============================================================================
 class AcidPanel : public juce::Component, private juce::Timer
 {
 public:
@@ -173,6 +189,8 @@ private:
                      clearGhostButton { "CLEAR" };
     std::array<juce::TextButton, acid::kNumPatterns> patternButtons;
     juce::ComboBox sourceBox, clockBox, presetBox, libraryBox, styleBox, scaleBox, ghostLengthBox, ghostMenu;
+    juce::ComboBox midiBarsBox;
+    MidiDragButton midiButton;
     std::unique_ptr<juce::FileChooser> fileChooser;
     std::array<Knob*, acid::ghost::kNumLanes> ghostTargets {};   // the knobs Ghost Hands plays
     StepGrid grid;

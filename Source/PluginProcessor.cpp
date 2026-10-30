@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "MidiExport.h"
 #include "Presets.h"
 #include "dsp/FactoryGhosts.h"
 
@@ -443,6 +444,33 @@ void TB303AcidProcessor::pastePattern()
     for (int i = 0; i < acid::kNumSteps; ++i)
         pattern.set (i, clipboard[(size_t) i]);
     patternEdited();
+}
+
+juce::File TB303AcidProcessor::exportPatternMidi (int bars) const
+{
+    acid::MidiExportSettings settings;
+    settings.root           = (int) raw.root->load();
+    settings.length         = (int) raw.length->load();
+    settings.scale          = (acid::Scale) (int) raw.scale->load();
+    settings.bpm            = raw.bpm->load();
+    settings.shuffle        = raw.shuffle->load();
+    settings.accentVelocity = (int) raw.accentVel->load();
+    settings.bars           = bars;
+
+    const int slot = getSelectedPattern();
+    const auto midi = acid::buildPatternMidi (engine.patterns[(size_t) slot], settings);
+
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("303 Devil Acid Rig");
+    if (! folder.createDirectory().wasOk())
+        return {};
+
+    const auto file = folder.getChildFile ("303 Devil pattern " + juce::String (slot + 1) + " ("
+                                           + juce::String (bars) + (bars == 1 ? " bar" : " bars") + ").mid");
+    file.deleteFile();
+    juce::FileOutputStream out (file);
+    if (! out.openedOk() || ! midi.writeTo (out))
+        return {};
+    return file;
 }
 
 void TB303AcidProcessor::clearGhost()

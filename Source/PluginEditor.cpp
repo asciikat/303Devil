@@ -675,8 +675,33 @@ void StatusLeds::paint (juce::Graphics& g)
 }
 
 //==============================================================================
+MidiDragButton::MidiDragButton (TB303AcidProcessor& p, const juce::ComboBox& barsBox)
+    : juce::TextButton ("DRAG MIDI"), proc (p), bars (barsBox)
+{
+    setTooltip ("Drag this onto a track in your DAW to drop the selected pattern as a MIDI clip");
+    setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+}
+
+void MidiDragButton::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragStarted || e.getDistanceFromDragStart() < 6)
+        return;
+
+    dragStarted = true;
+    const int nBars = juce::jmax (1, bars.getText().getIntValue());
+    const auto file = proc.exportPatternMidi (nBars);
+    if (file != juce::File())
+        juce::DragAndDropContainer::performExternalDragDropOfFiles ({ file.getFullPathName() }, false, this);
+}
+
+void MidiDragButton::mouseUp (const juce::MouseEvent&)
+{
+    dragStarted = false;
+    setState (buttonNormal);
+}
+
 AcidPanel::AcidPanel (TB303AcidProcessor& p)
-    : proc (p), grid (p, lnf), ghostView (p, lnf), energyMeter (p, lnf),
+    : proc (p), midiButton (p, midiBarsBox), grid (p, lnf), ghostView (p, lnf), energyMeter (p, lnf),
       scope (p, lnf), leds (p, lnf)
 {
     setLookAndFeel (&lnf);
@@ -782,6 +807,12 @@ AcidPanel::AcidPanel (TB303AcidProcessor& p)
     mutateButton.onClick = [this] { proc.mutatePattern(); };
     for (auto* b : { &randomButton, &initButton, &copyButton, &pasteButton, &mutateButton })
         addAndMakeVisible (*b);
+
+    for (int bars : { 1, 2, 4, 8 })
+        midiBarsBox.addItem (juce::String (bars) + (bars == 1 ? " bar" : " bars"), bars);
+    midiBarsBox.setSelectedId (4, juce::dontSendNotification);
+    addAndMakeVisible (midiBarsBox);
+    addAndMakeVisible (midiButton);
 
     for (int i = 0; i < acid::kNumPatterns; ++i)
     {
@@ -1239,6 +1270,9 @@ void AcidPanel::resized()
     mutateButton.setBounds (strip.removeFromLeft (84).reduced (2, 0));
     strip.removeFromLeft (12);
     libraryBox.setBounds (strip.removeFromLeft (240));
+    strip.removeFromLeft (12);
+    midiButton.setBounds (strip.removeFromLeft (100).reduced (2, 0));
+    midiBarsBox.setBounds (strip.removeFromLeft (80).reduced (2, 0));
 
     s.removeFromTop (6);
     grid.setBounds (s.removeFromTop ((int) (rowTop (5) + 1.0f)));

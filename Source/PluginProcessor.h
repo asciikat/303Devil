@@ -84,6 +84,10 @@ public:
     void pastePattern();
     bool canPaste() const noexcept { return hasClipboard; }
 
+    // Writes the selected pattern as a MIDI file in the temp folder, ready to drag into a host.
+    // Returns an empty File if it could not be written.
+    juce::File exportPatternMidi (int bars) const;
+
     // Ghost Hands (message thread)
     const acid::GhostHands& getGhost() const noexcept { return engine.ghost; }
     void toggleGhostRecord() noexcept { engine.ghost.toggleRecord(); }
