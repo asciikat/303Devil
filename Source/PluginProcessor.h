@@ -57,7 +57,7 @@ public:
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override { return tailSeconds.load (std::memory_order_relaxed); }
 
     // Factory sound presets (see Presets.h)
     int getNumPrograms() override;
@@ -95,6 +95,15 @@ public:
     const juce::String& getGhostName() const noexcept { return ghostName; }
     static juce::File getGhostFolder();
 
+    // Momentary performance offsets never rewrite a pattern or saved automation.
+    void setThrowHeld (bool on) noexcept { throwHeld.store (on); }
+    void setFillHeld (bool on) noexcept { fillHeld.store (on); }
+    bool isThrowHeld() const noexcept { return throwHeld.load(); }
+    bool isFillHeld() const noexcept { return fillHeld.load(); }
+    void holdPerformance();
+    void returnPerformance();
+    bool hasPerformanceHold() const noexcept { return ! heldPerformance.empty(); }
+
     juce::AudioProcessorValueTreeState apvts;
 
     // Telemetry for the editor
@@ -103,6 +112,7 @@ public:
     std::atomic<bool> uiGate { false }, uiSlide { false };
     std::atomic<float> uiAccentSweep { 0.0f };
     std::atomic<float> uiEnergy { 0.5f }, uiArcPosition { -1.0f };
+    std::atomic<float> uiOutputPeak { 0.0f };
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -134,6 +144,9 @@ private:
     juce::String ghostName;
     int namedTakes = 0;
     std::vector<float> tempRight;   // right channel when the host gives a mono bus
+    std::atomic<bool> throwHeld { false }, fillHeld { false };
+    std::atomic<float> tailSeconds { 30.0f };
+    std::vector<std::pair<juce::String, float>> heldPerformance; // message-thread snapshot
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TB303AcidProcessor)
 };

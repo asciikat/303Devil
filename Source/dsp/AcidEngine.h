@@ -64,6 +64,7 @@ struct EngineParams
     // Energy: 0.5 = neutral. energyArc > 0 = an arc drives it from the song position.
     double energy    = 0.5;
     int    energyArc = 0;
+    bool   performanceFill = false; // temporary accent/slide variation; stored steps stay intact
 };
 
 class AcidEngine
@@ -317,7 +318,13 @@ private:
 
     Step energise (Step s, int index, int64_t absStep) const noexcept
     {
-        return energiseStep (s, index, absStep, energyNow);
+        auto played = energiseStep (s, index, absStep, energyNow);
+        if (params.performanceFill && played.gate)
+        {
+            played.accent = played.accent || index % 2 == 0;
+            played.slide = played.slide || index % 4 == 2;
+        }
+        return played;
     }
 
     // Accents and slides the pattern has on the current beat, so Ghost Hands can follow it

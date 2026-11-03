@@ -10,7 +10,7 @@
 juce::Font uiFont (float height, bool bold);
 
 //==============================================================================
-// Silver 303 panel in classic mode, black and yellow in acid mode
+// Raised hardware controls on silver and punk powder-coated panels.
 class AcidLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
@@ -26,6 +26,11 @@ public:
                            float rotaryStartAngle, float rotaryEndAngle, juce::Slider&) override;
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&,
                                bool isMouseOver, bool isButtonDown) override;
+    void drawComboBox (juce::Graphics&, int width, int height, bool isButtonDown,
+                       int, int, int, int, juce::ComboBox&) override;
+    void drawLinearSlider (juce::Graphics&, int x, int y, int width, int height,
+                           float sliderPos, float, float, juce::Slider::SliderStyle,
+                           juce::Slider&) override;
     juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;
     juce::Font getLabelFont (juce::Label&) override;
     juce::Font getComboBoxFont (juce::ComboBox&) override;
@@ -33,6 +38,7 @@ public:
 private:
     bool acid = false;
     juce::Colour tick, knobHi, knobLo, pointer;
+    std::array<juce::Image, 3> knobArt;
 };
 
 //==============================================================================
@@ -157,6 +163,7 @@ private:
     void renderBackground (juce::Graphics&);
     void syncControls();   // button states that follow parameters / processor state
     void ghostMenuChosen (int id);
+    void updateServiceView();
     Knob& addKnob (std::vector<std::unique_ptr<Knob>>& row, const char* paramId, const char* title);
     void setupToggle (juce::TextButton&, const char* paramId,
                       std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>&);
@@ -171,6 +178,8 @@ private:
                      copyButton { "COPY" }, pasteButton { "PASTE" }, mutateButton { "MUTATE" },
                      generateButton { "GENERATE" }, recButton { "REC" }, ghostButton, ghostModeButton,
                      clearGhostButton { "CLEAR" };
+    juce::TextButton serviceButton { "SERVICE" }, throwButton { "THROW" }, fillButton { "FILL" },
+                     holdButton { "HOLD" }, returnButton { "RETURN" };
     std::array<juce::TextButton, acid::kNumPatterns> patternButtons;
     juce::ComboBox sourceBox, clockBox, presetBox, libraryBox, styleBox, scaleBox, ghostLengthBox, ghostMenu;
     std::unique_ptr<juce::FileChooser> fileChooser;
@@ -178,9 +187,11 @@ private:
     StepGrid grid;
     GhostView ghostView;
     juce::Slider energyFader;
+    juce::Slider squelchFader;
     juce::ComboBox arcBox;
     EnergyMeter energyMeter;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> energyAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> squelchAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> arcAttachment;
     Scope scope;
     StatusLeds leds;
@@ -197,6 +208,9 @@ private:
     int shownTakes = 0;
     juce::Image background;
     bool backgroundIsAcid = false;
+    bool serviceOpen = false;
+    juce::Image metal;
+    juce::TooltipWindow tooltips { this, 700 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AcidPanel)
 };
@@ -210,6 +224,7 @@ public:
 
     explicit TB303AcidEditor (TB303AcidProcessor&);
 
+    void paint (juce::Graphics&) override;
     void resized() override;
 
 private:

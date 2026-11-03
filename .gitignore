@@ -1,2 +1,5 @@
 build/
 *.zip
+
+build-windows/
+__pycache__/

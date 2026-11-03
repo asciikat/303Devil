@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 #include "PunkArt.h"
+#include "PunkFishAssets.h"
 #include "dsp/FactoryGhosts.h"
 #include "dsp/Energy.h"
 
@@ -16,7 +17,10 @@ juce::Font uiFont (float height, bool bold)
 //==============================================================================
 AcidLookAndFeel::AcidLookAndFeel()
 {
-    setAcid (false);
+    knobArt[0] = juce::ImageCache::getFromMemory (PunkFishAssets::knob_lime_png, PunkFishAssets::knob_lime_pngSize);
+    knobArt[1] = juce::ImageCache::getFromMemory (PunkFishAssets::knob_pink_png, PunkFishAssets::knob_pink_pngSize);
+    knobArt[2] = juce::ImageCache::getFromMemory (PunkFishAssets::knob_black_png, PunkFishAssets::knob_black_pngSize);
+    setAcid (true);
 }
 
 void AcidLookAndFeel::setAcid (bool shouldBeAcid)
@@ -39,11 +43,11 @@ void AcidLookAndFeel::setAcid (bool shouldBeAcid)
     }
     else
     {
-        panel       = Colour (0xff141418);
-        section     = Colour (0xff1d1d23);
-        sectionText = Colour (0xfff2d10e);
-        title       = Colour (0xfff2d10e);
-        tick        = Colour (0xfff2d10e).withAlpha (0.6f);
+        panel       = Colour (0xffdc8a28);
+        section     = Colour (0xffe79c3a);
+        sectionText = Colour (0xff312016);
+        title       = Colour (0xff241a15);
+        tick        = Colour (0xff3c281b).withAlpha (0.8f);
         knobHi      = Colour (0xff3a3a42);
         knobLo      = Colour (0xff09090b);
         pointer     = Colour (0xfff2d10e);
@@ -59,7 +63,7 @@ void AcidLookAndFeel::setAcid (bool shouldBeAcid)
     ledOff        = Colour (0xff2a2a2e);
     ghost         = Colour (0xff00e5ff);
 
-    const auto valueText = acid ? Colour (0xff7dff5a) : Colour (0xff2b2d33);
+    const auto valueText = Colour (0xffc2ee74);
 
     setColour (juce::ResizableWindow::backgroundColourId, panel);
     setColour (juce::Label::textColourId, title);
@@ -81,70 +85,119 @@ void AcidLookAndFeel::setAcid (bool shouldBeAcid)
     setColour (juce::PopupMenu::highlightedTextColourId, acid ? juce::Colours::black : juce::Colours::white);
 }
 
-void AcidLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos,
-                                        float rotaryStartAngle, float rotaryEndAngle, juce::Slider& slider)
+void AcidLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height, float pos,
+                                        float start, float end, juce::Slider& slider)
 {
-    const auto bounds = juce::Rectangle<float> ((float) x, (float) y, (float) width, (float) height).reduced (2.0f);
-    const float radius = std::min (bounds.getWidth(), bounds.getHeight()) * 0.5f;
-    const auto centre = bounds.getCentre();
-    const float angle = rotaryStartAngle + sliderPos * (rotaryEndAngle - rotaryStartAngle);
+    const float size = (float) juce::jmin (width, height) * 1.24f;
+    const auto art = juce::Rectangle<float> (size, size).withCentre ({ (float) x + (float) width * 0.5f,
+                                                                    (float) y + (float) height * 0.5f });
+    const auto id = slider.getName();
+    const int type = id == pid::resonance || id == pid::distortion ? 1
+                   : id == pid::cutoff || id == pid::envMod || id == pid::accent || id == pid::squelch ? 0 : 2;
+    const auto light = type == 1 ? punk::colours::hotPink : punk::colours::neonGreen;
+    const float angle = start + pos * (end - start);
+    const auto base = juce::Point<float> (art.getCentreX(), art.getY() + size * 0.58f);
+    juce::Path ring, active;
+    ring.addCentredArc (base.x, base.y, size * 0.37f, size * 0.25f, 0.0f, start, end, true);
+    active.addCentredArc (base.x, base.y, size * 0.37f, size * 0.25f, 0.0f, start, angle, true);
+    g.setColour (juce::Colours::black.withAlpha (0.25f));
+    g.fillEllipse (art.getX() + size * 0.15f, base.y - size * 0.21f, size * 0.76f, size * 0.48f);
+    g.strokePath (ring, juce::PathStrokeType (2.0f));
+    g.setColour (light.withAlpha (0.12f));
+    g.strokePath (active, juce::PathStrokeType (7.0f));
+    g.setColour (light.withAlpha (slider.isEnabled() ? 0.9f : 0.25f));
+    g.strokePath (active, juce::PathStrokeType (2.0f));
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    g.drawImage (knobArt[(size_t) type], art);
 
-    g.setColour (tick);
-    for (int i = 0; i <= 10; ++i)
+    // Projection measured by the asset-rendering camera, independent of window size.
+    const auto cap = juce::Point<float> (art.getCentreX(), art.getY() + size * 0.40572f);
+    auto point = [cap, size] (float proportion, float a)
     {
-        const float a = rotaryStartAngle + (float) i / 10.0f * (rotaryEndAngle - rotaryStartAngle);
-        g.drawLine ({ centre.getPointOnCircumference (radius, a), centre.getPointOnCircumference (radius - 4.0f, a) }, 1.2f);
+        return juce::Point<float> (cap.x + std::sin (a) * size * 0.31228f * proportion,
+                                   cap.y - std::cos (a) * size * 0.21469f * proportion);
+    };
+    g.setColour (type == 2 ? juce::Colour (0xffdbe3cf) : juce::Colour (0xff202725));
+    g.drawLine ({ point (0.38f, angle), point (0.88f, angle) }, juce::jmax (1.3f, size * 0.022f));
+    if (slider.isMouseOverOrDragging())
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.35f));
+        g.drawEllipse (art.getX() + size * 0.18f, cap.y - size * 0.22f, size * 0.64f, size * 0.44f, 0.8f);
     }
-
-    const float r = radius - 7.0f;
-    if (r <= 2.0f)
-        return;
-
-    g.setColour (juce::Colours::black.withAlpha (0.3f));
-    g.fillEllipse (centre.x - r + 1.5f, centre.y - r + 2.5f, 2.0f * r, 2.0f * r);
-
-    g.setGradientFill (juce::ColourGradient (knobHi, centre.x - r * 0.4f, centre.y - r * 0.6f,
-                                             knobLo, centre.x + r * 0.6f, centre.y + r * 0.9f, true));
-    g.fillEllipse (centre.x - r, centre.y - r, 2.0f * r, 2.0f * r);
-    g.setColour (juce::Colours::black);
-    g.drawEllipse (centre.x - r, centre.y - r, 2.0f * r, 2.0f * r, 1.0f);
-
-    juce::Path p;
-    p.addRoundedRectangle (-1.5f, -r + 2.0f, 3.0f, r * 0.55f, 1.5f);
-    g.setColour (pointer);
-    g.fillPath (p, juce::AffineTransform::rotation (angle).translated (centre));
-
-    // Ghost needle: a see-through second pointer showing where Ghost Hands has the knob
     const auto& ghostValue = slider.getProperties()["ghost"];
     if (! ghostValue.isVoid() && (double) ghostValue >= 0.0)
     {
-        const auto proportion = (float) juce::jlimit (0.0, 1.0, slider.valueToProportionOfLength ((double) ghostValue));
-        const float ghostAngle = rotaryStartAngle + proportion * (rotaryEndAngle - rotaryStartAngle);
-        const juce::Line<float> needle (centre.getPointOnCircumference (r * 0.25f, ghostAngle),
-                                        centre.getPointOnCircumference (radius - 1.0f, ghostAngle));
-        g.setColour (ghost.withAlpha (0.25f));
-        g.drawLine (needle, 6.0f);
+        const float ghostAngle = start + (float) slider.valueToProportionOfLength ((double) ghostValue) * (end - start);
         g.setColour (ghost.withAlpha (0.85f));
-        g.drawLine (needle, 2.0f);
-        g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (needle.getEnd()));
+        g.drawLine ({ point (0.3f, ghostAngle), point (0.95f, ghostAngle) }, 1.8f);
+        g.fillEllipse (juce::Rectangle<float> (4.0f, 4.0f).withCentre (point (0.95f, ghostAngle)));
     }
 }
 
 void AcidLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& button, const juce::Colour&,
                                             bool isMouseOver, bool isButtonDown)
 {
-    const auto r = button.getLocalBounds().toFloat().reduced (1.0f);
     auto base = button.findColour (button.getToggleState() ? juce::TextButton::buttonOnColourId
                                                            : juce::TextButton::buttonColourId);
-    if (isButtonDown)
-        base = base.darker (0.25f);
-    else if (isMouseOver)
-        base = base.brighter (0.1f);
+    if (isMouseOver && button.isEnabled())
+        base = base.brighter (0.12f);
+    if (! button.isEnabled())
+        base = base.withMultipliedAlpha (0.4f);
+    punk::drawKeycap (g, button.getLocalBounds().toFloat().reduced (0.5f), base,
+                      isButtonDown, button.getToggleState());
+    if (button.hasKeyboardFocus (true))
+    {
+        g.setColour (ghost);
+        g.drawRoundedRectangle (button.getLocalBounds().toFloat().reduced (2.0f), 3.0f, 1.3f);
+    }
+}
 
-    g.setColour (base);
-    g.fillRoundedRectangle (r, 4.0f);
-    g.setColour (juce::Colours::black.withAlpha (0.6f));
-    g.drawRoundedRectangle (r, 4.0f, 1.0f);
+void AcidLookAndFeel::drawComboBox (juce::Graphics& g, int width, int height, bool down,
+                                    int, int, int, int, juce::ComboBox& box)
+{
+    const auto r = juce::Rectangle<float> ((float) width, (float) height).reduced (0.5f);
+    g.setColour (juce::Colours::black.withAlpha (0.65f));
+    g.fillRoundedRectangle (r, 3.0f);
+    const auto face = r.reduced (1.5f);
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff16191d), face.getTopLeft(),
+                                            juce::Colour (0xff30343a), face.getBottomRight(), false));
+    g.fillRoundedRectangle (face, 2.0f);
+    g.setColour (box.hasKeyboardFocus (true) ? ghost : box.findColour (juce::ComboBox::outlineColourId));
+    g.drawRoundedRectangle (r, 3.0f, 1.0f);
+    const float cx = (float) width - 15.0f, cy = (float) height * 0.5f;
+    g.setColour (box.findColour (juce::ComboBox::arrowColourId).withMultipliedAlpha (box.isEnabled() ? 1.0f : 0.3f));
+    juce::Path arrow;
+    arrow.startNewSubPath (cx - 4.0f, cy + (down ? 2.0f : -2.0f));
+    arrow.lineTo (cx, cy + (down ? -2.0f : 2.0f));
+    arrow.lineTo (cx + 4.0f, cy + (down ? 2.0f : -2.0f));
+    g.strokePath (arrow, juce::PathStrokeType (1.7f));
+}
+
+void AcidLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int width, int height,
+                                        float pos, float minPos, float maxPos,
+                                        juce::Slider::SliderStyle style, juce::Slider& slider)
+{
+    if (style != juce::Slider::LinearHorizontal)
+    {
+        juce::LookAndFeel_V4::drawLinearSlider (g, x, y, width, height, pos, minPos, maxPos, style, slider);
+        return;
+    }
+    const float cy = (float) y + (float) height * 0.5f;
+    const auto rail = juce::Rectangle<float> ((float) x, cy - 3.0f, (float) width, 6.0f);
+    g.setColour (juce::Colours::black.withAlpha (0.8f));
+    g.fillRoundedRectangle (rail.expanded (1.0f), 3.0f);
+    g.setColour (slider.findColour (juce::Slider::trackColourId));
+    g.fillRoundedRectangle (rail.withWidth (juce::jlimit (0.0f, (float) width, pos - (float) x)), 2.0f);
+    for (int i = 0; i <= 10; ++i)
+    {
+        const float tx = (float) x + (float) i * (float) width / 10.0f;
+        g.setColour (title.withAlpha (0.4f));
+        g.drawVerticalLine (juce::roundToInt (tx), cy + 6.0f, cy + 8.0f);
+    }
+    auto cap = juce::Rectangle<float> (18.0f, 18.0f).withCentre ({ pos, cy });
+    punk::drawKeycap (g, cap, juce::Colour (0xff666970), slider.isMouseButtonDown(), false);
+    g.setColour (slider.findColour (juce::Slider::thumbColourId));
+    g.fillRect (cap.reduced (7.5f, 3.0f));
 }
 
 juce::Font AcidLookAndFeel::getTextButtonFont (juce::TextButton&, int buttonHeight)
@@ -166,6 +219,8 @@ juce::Font AcidLookAndFeel::getComboBoxFont (juce::ComboBox&)
 Knob::Knob (juce::AudioProcessorValueTreeState& state, const juce::String& paramId, const juce::String& knobTitle)
     : title (knobTitle)
 {
+    slider.setName (paramId);
+    slider.setTooltip (knobTitle + ": drag to adjust, double-click to reset; click the value to type.");
     slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 76, 15);
     addAndMakeVisible (slider);
@@ -177,9 +232,19 @@ Knob::Knob (juce::AudioProcessorValueTreeState& state, const juce::String& param
 
 void Knob::paint (juce::Graphics& g)
 {
-    g.setColour (findColour (juce::Label::textColourId));
+    const auto r = getLocalBounds().toFloat();
+    const auto legend = juce::Rectangle<float> (juce::jmin (r.getWidth() - 4.0f, 116.0f), 16.0f)
+                            .withCentre ({ r.getCentreX(), 8.0f });
+    g.setColour (juce::Colour (0xff27251f));
+    g.fillRoundedRectangle (legend, 2.0f);
+    g.setColour (juce::Colour (0xffefe6d5));
     g.setFont (uiFont (11.5f, true));
-    g.drawText (title, getLocalBounds().removeFromTop (kTitleHeight), juce::Justification::centred, false);
+    g.drawText (title, legend, juce::Justification::centred, false);
+    const auto display = juce::Rectangle<float> (76.0f, 16.0f).withCentre ({ r.getCentreX(), r.getBottom() - 7.5f });
+    g.setColour (juce::Colour (0xff171c16));
+    g.fillRoundedRectangle (display, 2.0f);
+    g.setColour (juce::Colours::black.withAlpha (0.5f));
+    g.drawRoundedRectangle (display, 2.0f, 1.0f);
 }
 
 void Knob::resized()
@@ -306,14 +371,13 @@ void StepGrid::paint (juce::Graphics& g)
             g.setColour (lnf.accentOn);
             g.fillEllipse (numberCell.withSizeKeepingCentre (8.0f, 8.0f).translated (-12.0f, 0.0f));
         }
-        g.setColour (lnf.sectionText.withAlpha (alpha * (i % 4 == 0 ? 1.0f : 0.65f)));
+        g.setColour (lnf.cellText.withAlpha (alpha * (i % 4 == 0 ? 1.0f : 0.65f)));
         g.setFont (uiFont (12.0f, i % 4 == 0));
         g.drawText (juce::String (i + 1), numberCell, juce::Justification::centred, false);
 
         // Note
         const auto noteCell = cellBounds (i, noteRow);
-        g.setColour (lnf.cellOff.withAlpha (alpha));
-        g.fillRoundedRectangle (noteCell, 3.0f);
+        punk::drawKeycap (g, noteCell, lnf.cellOff.withAlpha (alpha), false, false);
         const int midiNote = juce::jlimit (0, 127, root + s.note);
         g.setColour (lnf.cellText.withAlpha (alpha * (s.gate ? 1.0f : 0.4f)));
         g.setFont (uiFont (14.0f, true));
@@ -328,8 +392,7 @@ void StepGrid::paint (juce::Graphics& g)
         auto drawFlag = [&] (int row, bool on, juce::Colour onColour, const char* label)
         {
             const auto cell = cellBounds (i, row);
-            g.setColour ((on ? onColour : lnf.cellOff).withAlpha (alpha));
-            g.fillRoundedRectangle (cell, 3.0f);
+            punk::drawKeycap (g, cell, (on ? onColour : lnf.cellOff).withAlpha (alpha), false, on);
             g.setColour ((on ? juce::Colours::black : lnf.cellText.withAlpha (0.4f)).withMultipliedAlpha (alpha));
             g.setFont (uiFont (10.5f, true));
             g.drawText (label, cell, juce::Justification::centred, false);
@@ -461,6 +524,14 @@ void Scope::paint (juce::Graphics& g)
 
     g.setColour (lnf.scopeTrace);
     g.strokePath (path, juce::PathStrokeType (1.4f));
+    const float peak = proc.uiOutputPeak.load (std::memory_order_relaxed);
+    g.setColour (juce::Colour (0xee101610));
+    const auto readout = juce::Rectangle<float> (112.0f, 15.0f).withRightX (r.getRight() - 3.0f).withY (3.0f);
+    g.fillRect (readout);
+    g.setColour (peak >= 1.0f ? punk::colours::hotPink : punk::colours::neonGreen);
+    g.setFont (uiFont (10.0f, true));
+    g.drawText (peak > 0.000001f ? juce::String (juce::Decibels::gainToDecibels (peak), 1) + " dBFS"
+                               : juce::String ("-inf dBFS"), readout, juce::Justification::centredRight, false);
 }
 
 //==============================================================================
@@ -652,7 +723,7 @@ void StatusLeds::paint (juce::Graphics& g)
         { "ACCENT", juce::jlimit (0.0f, 1.0f, proc.uiAccentSweep.load() * 1.6f), lnf.accentOn },
     };
 
-    auto area = getLocalBounds().toFloat();
+    auto area = getLocalBounds().toFloat().withTrimmedBottom (15.0f);
     const float w = area.getWidth() / 3.0f;
     for (const auto& led : leds)
     {
@@ -680,16 +751,45 @@ AcidPanel::AcidPanel (TB303AcidProcessor& p)
       scope (p, lnf), leds (p, lnf)
 {
     setLookAndFeel (&lnf);
+    metal = juce::ImageCache::getFromMemory (PunkFishAssets::orange_metal_png, PunkFishAssets::orange_metal_pngSize);
+    serviceButton.setName ("service");
+    serviceButton.setClickingTogglesState (true);
+    serviceButton.onClick = [this] { serviceOpen = serviceButton.getToggleState(); updateServiceView(); resized(); repaint(); };
+    addAndMakeVisible (serviceButton);
+    throwButton.setName ("throw"); fillButton.setName ("fill");
+    holdButton.setName ("hold"); returnButton.setName ("return");
+    throwButton.onStateChange = [this] { proc.setThrowHeld (throwButton.isDown()); };
+    fillButton.onStateChange = [this] { proc.setFillHeld (fillButton.isDown()); };
+    holdButton.onClick = [this] { proc.holdPerformance(); syncControls(); };
+    returnButton.onClick = [this] { proc.returnPerformance(); syncControls(); };
+    throwButton.setTooltip ("Hold to feed a filtered tempo-synced delay. Release keeps the echo tail.");
+    fillButton.setTooltip ("Hold to add accents and slides to played steps. Stored patterns remain intact.");
+    holdButton.setTooltip ("Capture current sound, Energy and Ghost settings as a return point.");
+    returnButton.setTooltip ("Restore the captured settings and release Throw/Fill. Host automation can override them.");
+    serviceButton.setTooltip ("Show deeper voice, clock and effects settings without losing the sequence.");
+    for (auto* button : { &throwButton, &fillButton, &holdButton, &returnButton })
+    {
+        button->setColour (juce::TextButton::buttonColourId, punk::colours::hotPink.darker (0.12f));
+        button->setColour (juce::TextButton::textColourOffId, juce::Colours::black);
+        addAndMakeVisible (*button);
+    }
+    squelchFader.setSliderStyle (juce::Slider::LinearHorizontal);
+    squelchFader.setName (pid::squelch);
+    squelchFader.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    squelchFader.setDoubleClickReturnValue (true, 0.0);
+    squelchFader.setTooltip ("Squelch: perform the filter, envelope, resonance and drive together.");
+    addAndMakeVisible (squelchFader);
+    squelchAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, pid::squelch, squelchFader);
 
     addKnob (voiceKnobs, pid::tune,      "TUNING");
-    addKnob (voiceKnobs, pid::cutoff,    "CUTOFF");
+    addKnob (voiceKnobs, pid::cutoff,    "CUT");
     addKnob (voiceKnobs, pid::resonance, "RESONANCE");
-    addKnob (voiceKnobs, pid::envMod,    "ENV MOD");
+    addKnob (voiceKnobs, pid::envMod,    "ENV");
     addKnob (voiceKnobs, pid::decay,     "DECAY");
     addKnob (voiceKnobs, pid::accent,    "ACCENT");
     addKnob (voiceKnobs, pid::volume,    "VOLUME");
 
-    addKnob (acidKnobs, pid::overdrive,   "OVERDRIVE");
+    addKnob (acidKnobs, pid::overdrive,   "DRIVE");
     addKnob (acidKnobs, pid::filterFM,    "FILTER FM");
     addKnob (acidKnobs, pid::tracking,    "TRACKING");
     addKnob (acidKnobs, pid::sweep,       "SWEEP SPD");
@@ -698,8 +798,8 @@ AcidPanel::AcidPanel (TB303AcidProcessor& p)
     addKnob (acidKnobs, pid::accentDecay, "ACC DECAY");
     addKnob (acidKnobs, pid::softAttack,  "ATTACK");
     addKnob (acidKnobs, pid::muffler,     "MUFFLER");
-    addKnob (acidKnobs, pid::distortion,  "DISTORT");
-    addKnob (acidKnobs, pid::sub,         "SUB");
+    addKnob (acidKnobs, pid::distortion,  "BITE");
+    addKnob (acidKnobs, pid::sub,         "BODY");
 
     addKnob (fxKnobs, pid::delayMix,      "DELAY");
     addKnob (fxKnobs, pid::delayTime,     "DLY TIME");
@@ -822,6 +922,8 @@ AcidPanel::AcidPanel (TB303AcidProcessor& p)
 AcidPanel::~AcidPanel()
 {
     stopTimer();
+    proc.setThrowHeld (false);
+    proc.setFillHeld (false);
     setLookAndFeel (nullptr);
 }
 
@@ -851,15 +953,19 @@ void AcidPanel::setupCombo (juce::ComboBox& box, const char* paramId,
 
 void AcidPanel::applyTheme()
 {
-    lnf.setAcid (shownAcid);
+    lnf.setAcid (true); // orange physical skin is independent of the sound circuit mode
+    squelchFader.setColour (juce::Slider::trackColourId, punk::colours::neonGreen.darker (0.3f));
+    squelchFader.setColour (juce::Slider::thumbColourId, punk::colours::neonGreen);
     energyFader.setColour (juce::Slider::trackColourId, shownAcid ? juce::Colour (0xffff2e88) : lnf.accentOn);
     energyFader.setColour (juce::Slider::backgroundColourId, juce::Colour (0xff26262c));
     energyFader.setColour (juce::Slider::thumbColourId, shownAcid ? juce::Colour (0xfff2d10e) : juce::Colour (0xfff4f4f4));
     acidButton.setButtonText (shownAcid ? "ACID MODE: ON" : "ACID MODE: OFF");
     for (auto& k : acidKnobs)
-        k->setAlpha (shownAcid ? 1.0f : 0.4f);
+        k->setAlpha (shownAcid ? 1.0f : 0.5f);
     sendLookAndFeelChange();
     repaint();
+    if (auto* chassis = getParentComponent())
+        chassis->repaint();
 }
 
 void AcidPanel::timerCallback()
@@ -877,6 +983,7 @@ void AcidPanel::timerCallback()
     leds.repaint();
     ghostView.repaint();
     energyMeter.repaint();
+    repaint (1044, 92, 126, 66);
 }
 
 void AcidPanel::ghostMenuChosen (int id)
@@ -917,6 +1024,8 @@ void AcidPanel::ghostMenuChosen (int id)
 
 void AcidPanel::syncControls()
 {
+    returnButton.setEnabled (proc.hasPerformanceHold());
+    holdButton.setToggleState (proc.hasPerformanceHold(), juce::dontSendNotification);
     const juce::String waveText = proc.apvts.getRawParameterValue (pid::wave)->load() > 0.5f ? "WAVE: SQUARE" : "WAVE: SAW";
     if (waveButton.getButtonText() != waveText)
         waveButton.setButtonText (waveText);
@@ -1002,252 +1111,187 @@ void AcidPanel::paint (juce::Graphics& g)
         backgroundIsAcid = shownAcid;
     }
     g.drawImage (background, getLocalBounds().toFloat());
+    punk::drawFish (g, { 1044.0f, 94.0f, 126.0f, 63.0f }, punk::colours::hotPink,
+                    proc.uiAccentSweep.load() * 2.0f);
 }
 
 void AcidPanel::renderBackground (juce::Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat();
-    const juce::String seqHint ("drag or scroll notes, click to toggle, drag across steps to paint, double-click note = root");
-
-    if (! shownAcid)
+    g.drawImage (metal, bounds);
+    g.setColour (juce::Colours::black.withAlpha (0.06f));
+    g.fillRect (bounds);
+    auto plate = [&] (juce::Rectangle<int> box, const juce::String& name, juce::Colour tape, bool recessed)
     {
-        // Stock silver panel, with one acid sticker slapped on it
-        g.fillAll (lnf.panel);
-        punk::drawSmiley (g, headerArea.toFloat().removeFromLeft (34.0f).reduced (2.0f), false, false);
-        g.setColour (lnf.title);
-        g.setFont (uiFont (22.0f, true));
-        g.drawText ("TB-303  DEVIL ACID RIG", headerArea.withTrimmedLeft (44), juce::Justification::centredLeft, false);
-
-        auto drawSection = [&] (juce::Rectangle<int> area, const juce::String& name)
+        const auto r = box.toFloat();
+        g.setColour (juce::Colours::black.withAlpha (0.45f));
+        g.drawRoundedRectangle (r.translated (0.0f, 1.5f), 4.0f, 2.0f);
+        if (recessed)
         {
-            g.setColour (lnf.section);
-            g.fillRoundedRectangle (area.toFloat(), 6.0f);
-            g.setColour (lnf.sectionText);
-            g.setFont (uiFont (11.0f, true));
-            g.drawText (name, area.reduced (10, 4).removeFromTop (14), juce::Justification::centredLeft, false);
-        };
-
-        drawSection (voiceArea, "VOICE");
-        drawSection (cheatArea, "CHEAT  -  MAKES ACID EASY");
-        g.setColour (lnf.sectionText);
-        g.setFont (uiFont (11.0f, true));
-        g.drawText ("STYLE", styleLabelArea, juce::Justification::centredLeft, false);
-        g.drawText ("SCALE", scaleLabelArea, juce::Justification::centredLeft, false);
-        drawSection (acidArea, "ACID MODE  -  OFF (STOCK 303 VALUES IN USE)");
-        drawSection (fxArea, "MAIN STAGE FX  -  TEMPO-SYNCED DELAY, REVERB, PUMP, FILTER LFO");
-        drawSection (ghostArea, "GHOST HANDS  -  REC YOUR KNOB MOVES. LEARN MODE IMPROVISES IN YOUR STYLE. GRAB A KNOB TO TAKE IT BACK");
-        g.setColour (lnf.sectionText);
-        g.setFont (uiFont (11.0f, true));
-        g.drawText ("TAKE", ghostLengthLabelArea, juce::Justification::centredLeft, false);
-        drawSection (energyArea, "ENERGY");
-        g.setColour (lnf.sectionText);
-        g.setFont (uiFont (11.0f, true));
-        g.drawText ("ARC", arcLabelArea, juce::Justification::centredLeft, false);
-        drawSection (seqArea, "SEQUENCER   " + seqHint);
-
-        g.setColour (lnf.sectionText);
-        g.setFont (uiFont (11.0f, true));
-        g.drawText ("PATTERN", patternLabelArea, juce::Justification::centredLeft, false);
-        return;
-    }
-
-    // Acid mode: photocopied punk flyer
-    juce::Random rng (303);
-    g.fillAll (lnf.panel);
-    punk::drawSplatter (g, bounds, rng, 70, { punk::colours::hotPink, punk::colours::neonGreen, punk::colours::acidYellow }, 0.22f);
-    punk::drawGrain (g, bounds, rng, 9000);
-    punk::drawHazard (g, bounds.withHeight (7.0f), 10.0f);
-    punk::drawHazard (g, bounds.withTop (bounds.getBottom() - 7.0f), 10.0f);
-
-    const auto header = headerArea.toFloat();
-    punk::drawSmiley (g, { header.getX(), header.getY() - 2.0f, 40.0f, 40.0f }, true, true);
-    punk::drawRansom (g, "DEVIL ACID 303", { header.getX() + 50.0f, header.getY() + 6.0f }, 26.0f, rng);
-
-    auto drawSection = [&] (juce::Rectangle<int> area, const juce::String& name, juce::Colour neon,
-                            const juce::String& note, float tilt)
-    {
-        const auto r = area.toFloat();
-        g.setColour (juce::Colour (0xd0141418));
-        g.fillRect (r);
-
-        // Hand-sprayed outline: a dashed neon border, slightly wobbly
-        juce::Path outline;
-        outline.addRectangle (r.reduced (1.5f));
-        juce::Path dashed;
-        const float dashes[] = { 14.0f, 5.0f, 3.0f, 5.0f };
-        juce::PathStrokeType (2.0f).createDashedStroke (dashed, outline, dashes, 4);
-        g.setColour (neon.withAlpha (0.85f));
-        g.fillPath (dashed);
-
-        const float tapeWidth = 26.0f + (float) name.length() * 9.0f;
-        punk::drawTape (g, { r.getX() + 10.0f, r.getY() - 5.0f, tapeWidth, 18.0f }, name, neon, tilt);
-
-        if (note.isNotEmpty())
-        {
-            g.setColour (neon.withAlpha (0.75f));
-            g.setFont (uiFont (11.0f, false));
-            g.drawText (note, juce::Rectangle<float> (r.getX() + tapeWidth + 22.0f, r.getY() - 2.0f, r.getWidth() - tapeWidth - 30.0f, 14.0f),
-                        juce::Justification::centredLeft, true);
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff111515), r.getTopLeft(),
+                                                    juce::Colour (0xff292b28), r.getBottomRight(), false));
+            g.fillRoundedRectangle (r, 4.0f);
         }
+        g.setColour (juce::Colours::white.withAlpha (0.3f));
+        g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 0.8f);
+        punk::drawTape (g, { r.getX() + 12.0f, r.getY() + 5.0f,
+                            juce::jmin (190.0f, 30.0f + (float) name.length() * 11.0f), 19.0f }, name, tape, -0.015f);
+        punk::drawScrew (g, { r.getRight() - 9.0f, r.getY() + 10.0f });
+        punk::drawScrew (g, { r.getRight() - 9.0f, r.getBottom() - 9.0f });
     };
+    g.setColour (juce::Colour (0xff1e211d));
+    g.setFont (uiFont (39.0f, true).italicised());
+    g.drawText ("PUNK FISH", juce::Rectangle<int> { 22, 9, 285, 43 }, juce::Justification::centredLeft, false);
+    punk::drawTape (g, { 295.0f, 22.0f, 120.0f, 20.0f }, "ACID TECHNO", punk::colours::neonGreen, -0.035f);
+    plate (voiceArea, serviceOpen ? "SERVICE" : "VOICE", punk::colours::acidYellow, false);
+    plate (ghostArea, "GHOST HANDS", punk::colours::neonGreen, true);
+    plate (acidArea, "CHEMISTRY", punk::colours::acidYellow, false);
+    plate (energyArea, "RAVE", punk::colours::hotPink, false);
+    plate (seqArea, "SEQUENCE", punk::colours::neonGreen, true);
+    plate (fxArea, "SPACE", punk::colours::hotPink, false);
+    if (! serviceOpen)
+    {
+        g.setColour (juce::Colour (0xff241e18));
+        g.setFont (uiFont (10.0f, true));
+        g.drawText ("PLAY THE FILTER. RIDE THE ACCENT.", juce::Rectangle<int> { 350, 74, 330, 18 }, juce::Justification::centredRight, false);
+    }
+    g.setColour (juce::Colour (0xff201d18));
+    g.setFont (uiFont (12.0f, true));
+    g.drawText ("SQUELCH", juce::Rectangle<int> { 42, 431, 220, 16 }, juce::Justification::centredLeft, false);
+    g.drawText ("ENERGY", juce::Rectangle<int> { 318, 431, 220, 16 }, juce::Justification::centredLeft, false);
+    g.setColour (juce::Colour (0xffb0b8a2));
+    g.setFont (uiFont (10.0f, true));
+    g.drawText ("PATTERN", juce::Rectangle<int> { 158, 506, 200, 12 }, juce::Justification::centredLeft, false);
+    g.drawText ("SOURCE / CLOCK", juce::Rectangle<int> { 490, 718, 280, 13 }, juce::Justification::centredLeft, false);
+    g.drawText ("STYLE", juce::Rectangle<int> { 830, 723, 95, 13 }, juce::Justification::centredLeft, false);
+    g.drawText ("SCALE", juce::Rectangle<int> { 938, 723, 95, 13 }, juce::Justification::centredLeft, false);
+    g.setColour (juce::Colour (0xff25251e));
+    g.drawText ("ENERGY ARC", juce::Rectangle<int> { 448, 823, 200, 14 }, juce::Justification::centredLeft, false);
+    g.drawText ("LIVE OUTPUT", juce::Rectangle<int> { 675, 820, 200, 15 }, juce::Justification::centredLeft, false);
+    // Original stencil mark: a fish spine, teeth and fins printed onto the casing.
+    juce::Graphics::ScopedSaveState save (g);
+    g.addTransform (juce::AffineTransform::translation (365.0f, 872.0f));
+    g.setColour (juce::Colour (0xff24221d));
+    g.drawLine (-24.0f, 0.0f, 24.0f, 0.0f, 3.0f);
+    juce::Path jaw;
+    jaw.startNewSubPath (10.0f, -16.0f); jaw.lineTo (30.0f, -6.0f);
+    jaw.lineTo (18.0f, 0.0f); jaw.lineTo (30.0f, 8.0f); jaw.lineTo (10.0f, 17.0f);
+    g.strokePath (jaw, juce::PathStrokeType (3.0f));
+    for (int i = 0; i < 5; ++i)
+    {
+        const float x = -18.0f + (float) i * 6.0f;
+        g.drawLine (x, -13.0f + (float) i, x + 4.0f, 0.0f, 2.0f);
+        g.drawLine (x + 4.0f, 0.0f, x, 13.0f - (float) i, 2.0f);
+    }
+    g.drawLine (-24.0f, 0.0f, -33.0f, -12.0f, 3.0f);
+    g.drawLine (-24.0f, 0.0f, -33.0f, 12.0f, 3.0f);
+    g.drawLine (14.0f, -11.0f, 19.0f, -6.0f, 2.0f);
+    g.drawLine (19.0f, -11.0f, 14.0f, -6.0f, 2.0f);
+}
 
-    drawSection (voiceArea, "VOICE", punk::colours::acidYellow, {}, -0.03f);
-    drawSection (cheatArea, "CHEAT", punk::colours::hotPink, "acid made easy", 0.03f);
-    g.setColour (punk::colours::hotPink);
-    g.setFont (uiFont (11.0f, true));
-    g.drawText ("STYLE", styleLabelArea, juce::Justification::centredLeft, false);
-    g.drawText ("SCALE", scaleLabelArea, juce::Justification::centredLeft, false);
-    drawSection (acidArea, "ACID MODE", punk::colours::neonGreen, "devil fish mods + drive", 0.025f);
-    drawSection (fxArea, "MAIN STAGE FX", punk::colours::paper, "synced to the beat", -0.015f);
-    drawSection (ghostArea, "GHOST HANDS", punk::colours::ghostCyan, "it learns your hands. grab a knob to take it back", 0.02f);
-    g.setColour (punk::colours::ghostCyan);
-    g.setFont (uiFont (11.0f, true));
-    g.drawText ("TAKE", ghostLengthLabelArea, juce::Justification::centredLeft, false);
-    drawSection (energyArea, "ENERGY", punk::colours::hotPink, {}, -0.025f);
-    g.setColour (punk::colours::hotPink);
-    g.setFont (uiFont (11.0f, true));
-    g.drawText ("ARC", arcLabelArea, juce::Justification::centredLeft, false);
-    drawSection (seqArea, "SEQUENCER", punk::colours::acidYellow, seqHint, -0.02f);
-
-    punk::drawTape (g, patternLabelArea.toFloat().withSizeKeepingCentre (60.0f, 18.0f), "PATT", punk::colours::paper, 0.04f);
+void AcidPanel::updateServiceView()
+{
+    for (auto& knob : voiceKnobs) knob->setVisible (false);
+    for (auto& knob : acidKnobs) knob->setVisible (false);
+    for (auto& knob : fxKnobs) knob->setVisible (false);
+    for (auto& knob : cheatKnobs) knob->setVisible (false);
+    for (int i : { 0, 8, 9, 10 }) acidKnobs[(size_t) i]->setVisible (true);
+    for (int i : { 0, 3, 5 }) fxKnobs[(size_t) i]->setVisible (true);
+    voiceKnobs[6]->setVisible (true);
+    if (! serviceOpen)
+    {
+        for (int i = 1; i <= 5; ++i) voiceKnobs[(size_t) i]->setVisible (true);
+        acidKnobs[4]->setVisible (true);
+    }
+    else
+    {
+        voiceKnobs[0]->setVisible (true);
+        for (int i : { 1, 2, 3, 5, 6, 7 }) acidKnobs[(size_t) i]->setVisible (true);
+        for (int i : { 1, 2, 4, 6, 7 }) fxKnobs[(size_t) i]->setVisible (true);
+        cheatKnobs[1]->setVisible (true);
+        cheatKnobs[2]->setVisible (true);
+    }
+    background = {};
 }
 
 void AcidPanel::resized()
 {
-    auto r = getLocalBounds().reduced (12);
-
-    headerArea = r.removeFromTop (40);
+    headerArea = { 16, 8, 1168, 46 };
+    voiceArea = { 16, 68, 690, 330 };
+    ghostArea = { 720, 68, 464, 210 };
+    acidArea = { 720, 290, 464, 108 };
+    energyArea = { 16, 410, 1168, 84 };
+    seqArea = { 16, 506, 1168, 292 };
+    fxArea = { 16, 810, 1168, 122 };
+    presetBox.setBounds (430, 17, 238, 31);
+    waveButton.setBounds (680, 15, 110, 35);
+    acidButton.setBounds (800, 15, 140, 35);
+    serviceButton.setBounds (950, 15, 108, 35);
+    runButton.setBounds (1070, 15, 104, 35);
+    updateServiceView();
+    if (! serviceOpen)
     {
-        auto h = headerArea;
-        acidButton.setBounds (h.removeFromRight (190).reduced (0, 4));
-        h.removeFromRight (8);
-        waveButton.setBounds (h.removeFromRight (140).reduced (0, 4));
-        h.removeFromRight (8);
-        presetBox.setBounds (h.removeFromRight (220).reduced (0, 6));
+        std::array<Knob*, 6> primary { voiceKnobs[1].get(), voiceKnobs[2].get(), voiceKnobs[3].get(),
+                                      voiceKnobs[4].get(), voiceKnobs[5].get(), acidKnobs[4].get() };
+        for (int i = 0; i < 6; ++i)
+            primary[(size_t) i]->setBounds (30 + (i % 3) * 220, 104 + (i / 3) * 144, 214, 139);
     }
-    r.removeFromTop (8);
-
-    auto layoutRow = [] (std::vector<std::unique_ptr<Knob>>& knobs, juce::Rectangle<int> area)
+    else
     {
-        const int w = area.getWidth() / (int) knobs.size();
-        for (auto& k : knobs)
-            k->setBounds (area.removeFromLeft (w).reduced (3, 0));
-    };
-
-    // CHEAT panel on the right, next to the three knob rows
-    {
-        auto upper = r.withHeight (116 + 8 + 104 + 8 + 104);
-        cheatArea = upper.removeFromRight (220);
-        r.removeFromRight (228);
-
-        auto c = cheatArea.reduced (10, 6).withTrimmedTop (16);
-        cheatKnobs[0]->setBounds (c.removeFromTop (110));
-        auto tweakRow = c.removeFromTop (84);
-        cheatKnobs[1]->setBounds (tweakRow.removeFromLeft (tweakRow.getWidth() / 2));
-        cheatKnobs[2]->setBounds (tweakRow);
-        c.removeFromTop (4);
-        auto styleRow = c.removeFromTop (26);
-        styleLabelArea = styleRow.removeFromLeft (48);
-        styleBox.setBounds (styleRow);
-        c.removeFromTop (6);
-        auto scaleRow = c.removeFromTop (26);
-        scaleLabelArea = scaleRow.removeFromLeft (48);
-        scaleBox.setBounds (scaleRow);
-        c.removeFromTop (8);
-        generateButton.setBounds (c);
+        std::array<Knob*, 14> secondary { voiceKnobs[0].get(), acidKnobs[1].get(), acidKnobs[2].get(),
+            acidKnobs[3].get(), acidKnobs[5].get(), acidKnobs[6].get(), acidKnobs[7].get(),
+            fxKnobs[1].get(), fxKnobs[2].get(), fxKnobs[4].get(), fxKnobs[6].get(), fxKnobs[7].get(),
+            cheatKnobs[1].get(), cheatKnobs[2].get() };
+        for (int i = 0; i < 14; ++i)
+            secondary[(size_t) i]->setBounds (28 + (i % 7) * 96, 112 + (i / 7) * 136, 92, 120);
     }
-
-    voiceArea = r.removeFromTop (116);
-    layoutRow (voiceKnobs, voiceArea.reduced (10, 6).withTrimmedTop (14));
-    r.removeFromTop (8);
-
-    acidArea = r.removeFromTop (104);
-    layoutRow (acidKnobs, acidArea.reduced (8, 6).withTrimmedTop (14));
-    r.removeFromTop (8);
-
-    fxArea = r.removeFromTop (104);
-    layoutRow (fxKnobs, fxArea.reduced (8, 6).withTrimmedTop (14));
-    r.removeFromTop (8);
-
-    ghostArea = r.removeFromTop (100).withRight (getWidth() - 12);
+    ghostView.setBounds (734, 94, 305, 63);
+    recButton.setBounds (734, 166, 94, 29);
+    ghostButton.setBounds (836, 166, 105, 29);
+    ghostModeButton.setBounds (949, 166, 122, 29);
+    clearGhostButton.setBounds (1079, 166, 90, 29);
+    ghostLengthLabelArea = { 734, 207, 37, 25 };
+    ghostLengthBox.setBounds (774, 207, 91, 27);
+    ghostMenu.setBounds (875, 207, 123, 27);
+    ghostKnobs[0]->setBounds (1007, 202, 80, 69);
+    ghostKnobs[1]->setBounds (1091, 202, 80, 69);
+    const int chem[] = { 0, 10, 9, 8 };
+    for (int i = 0; i < 4; ++i)
+        acidKnobs[(size_t) chem[i]]->setBounds (734 + i * 109, 316, 103, 76);
+    squelchFader.setBounds (40, 449, 246, 31);
+    energyFader.setBounds (316, 449, 246, 31);
+    int bx = 596;
+    for (auto* button : { &throwButton, &fillButton, &holdButton, &returnButton })
     {
-        auto gr = ghostArea.reduced (10, 6).withTrimmedTop (14);
-        auto centred = [] (juce::Rectangle<int> area) { return area.withSizeKeepingCentre (area.getWidth(), 30); };
-        recButton.setBounds (centred (gr.removeFromLeft (100)));
-        gr.removeFromLeft (8);
-        ghostButton.setBounds (centred (gr.removeFromLeft (112)));
-        gr.removeFromLeft (8);
-        ghostModeButton.setBounds (centred (gr.removeFromLeft (118)));
-        gr.removeFromLeft (10);
-        ghostLengthLabelArea = gr.removeFromLeft (38);
-        ghostLengthBox.setBounds (centred (gr.removeFromLeft (96)).withSizeKeepingCentre (96, 26));
-        gr.removeFromLeft (6);
-        ghostKnobs[0]->setBounds (gr.removeFromLeft (80));
-        ghostKnobs[1]->setBounds (gr.removeFromLeft (80));
-        gr.removeFromLeft (6);
-        {
-            auto column = gr.removeFromLeft (124).withSizeKeepingCentre (124, 60);
-            ghostMenu.setBounds (column.removeFromTop (27));
-            column.removeFromTop (6);
-            clearGhostButton.setBounds (column);
-        }
-        gr.removeFromLeft (12);
-        ghostView.setBounds (gr.reduced (0, 2));
+        button->setBounds (bx, 437, 132, 42);
+        bx += 143;
     }
-    r.removeFromTop (8);
-
-    energyArea = r.removeFromTop (40).withRight (getWidth() - 12);
-    {
-        auto er = energyArea.reduced (10, 6);
-        er.removeFromLeft (104);   // section name
-        energyMeter.setBounds (er.removeFromRight (300));
-        er.removeFromRight (10);
-        arcBox.setBounds (er.removeFromRight (230));
-        arcLabelArea = er.removeFromRight (34);
-        er.removeFromRight (10);
-        energyFader.setBounds (er);
-    }
-    r.removeFromTop (8);
-
-    seqArea = r.withRight (getWidth() - 12);
-    auto s = seqArea.reduced (10, 6).withTrimmedTop (16);
-
-    auto controls = s.removeFromTop (86);
-    auto centred = [] (juce::Rectangle<int> area) { return area.withSizeKeepingCentre (area.getWidth(), 30); };
-    runButton.setBounds (centred (controls.removeFromLeft (64)));
-    controls.removeFromLeft (8);
-    sourceBox.setBounds (centred (controls.removeFromLeft (160)));
-    controls.removeFromLeft (8);
-    clockBox.setBounds (centred (controls.removeFromLeft (118)));
-    controls.removeFromLeft (8);
-    initButton.setBounds (centred (controls.removeFromRight (70)));
-    controls.removeFromRight (8);
-    randomButton.setBounds (centred (controls.removeFromRight (96)));
-    controls.removeFromRight (8);
-    layoutRow (seqKnobs, controls);
-
-    s.removeFromTop (4);
-    auto strip = s.removeFromTop (26);
-    patternLabelArea = strip.removeFromLeft (64);
-    for (auto& b : patternButtons)
-    {
-        b.setBounds (strip.removeFromLeft (40).reduced (2, 0));
-    }
-    strip.removeFromLeft (12);
-    copyButton.setBounds (strip.removeFromLeft (70).reduced (2, 0));
-    pasteButton.setBounds (strip.removeFromLeft (70).reduced (2, 0));
-    mutateButton.setBounds (strip.removeFromLeft (84).reduced (2, 0));
-    strip.removeFromLeft (12);
-    libraryBox.setBounds (strip.removeFromLeft (240));
-
-    s.removeFromTop (6);
-    grid.setBounds (s.removeFromTop ((int) (rowTop (5) + 1.0f)));
-    s.removeFromTop (8);
-
-    auto bottom = s;
-    leds.setBounds (bottom.removeFromLeft (330).reduced (4, 2));
-    bottom.removeFromLeft (8);
-    scope.setBounds (bottom);
+    for (int i = 0; i < acid::kNumPatterns; ++i)
+        patternButtons[(size_t) i].setBounds (150 + i * 40, 523, 36, 27);
+    copyButton.setBounds (486, 523, 65, 27);
+    pasteButton.setBounds (557, 523, 65, 27);
+    mutateButton.setBounds (628, 523, 80, 27);
+    randomButton.setBounds (714, 523, 89, 27);
+    initButton.setBounds (809, 523, 65, 27);
+    libraryBox.setBounds (884, 523, 286, 27);
+    grid.setBounds (34, 558, 1134, 157);
+    for (int i = 0; i < 5; ++i)
+        seqKnobs[(size_t) i]->setBounds (32 + i * 87, 724, 82, 67);
+    sourceBox.setBounds (490, 738, 174, 28);
+    clockBox.setBounds (674, 738, 141, 28);
+    styleLabelArea = { 830, 722, 95, 14 };
+    scaleLabelArea = { 938, 722, 95, 14 };
+    styleBox.setBounds (830, 740, 98, 26);
+    scaleBox.setBounds (938, 740, 98, 26);
+    generateButton.setBounds (1048, 735, 120, 38);
+    fxKnobs[0]->setBounds (32, 839, 92, 86);
+    fxKnobs[3]->setBounds (137, 839, 92, 86);
+    fxKnobs[5]->setBounds (242, 839, 92, 86);
+    voiceKnobs[6]->setBounds (1070, 839, 96, 86);
+    arcBox.setBounds (448, 844, 201, 27);
+    energyMeter.setBounds (448, 881, 201, 27);
+    scope.setBounds (675, 841, 375, 54);
+    leds.setBounds (681, 899, 366, 31);
 }
 
 TB303AcidEditor::TB303AcidEditor (TB303AcidProcessor& p)
@@ -1265,10 +1309,39 @@ TB303AcidEditor::TB303AcidEditor (TB303AcidProcessor& p)
     setSize (savedWidth, juce::roundToInt (savedWidth * (double) kDesignHeight / kDesignWidth));
 }
 
+void TB303AcidEditor::paint (juce::Graphics& g)
+{
+    const float scale = (float) getWidth() / (float) kDesignWidth;
+    g.addTransform (juce::AffineTransform::scale (scale));
+    const auto shell = juce::Colour (0xffa95620);
+    g.fillAll (juce::Colour (0xff171719));
+    // Visible side cheeks and front fascia sit beneath the inset playing surface.
+    const auto chassis = juce::Rectangle<float> (4.0f, 4.0f, 1192.0f, 948.0f);
+    g.setGradientFill (juce::ColourGradient (shell.brighter (0.2f), chassis.getTopLeft(),
+                                            shell.darker (0.45f), chassis.getBottomRight(), false));
+    g.fillRoundedRectangle (chassis, 9.0f);
+    const auto fascia = juce::Rectangle<float> (22.0f, 925.0f, 1156.0f, 25.0f);
+    g.setGradientFill (juce::ColourGradient (shell, fascia.getTopLeft(), shell.darker (0.45f),
+                                            fascia.getBottomLeft(), false));
+    g.fillRect (fascia);
+    g.setColour (juce::Colours::white.withAlpha (0.3f));
+    g.drawHorizontalLine (925, 22.0f, 1178.0f);
+    g.setColour (juce::Colour (0xffe9d7b8));
+    g.setFont (punk::font (juce::Font::getDefaultMonospacedFontName(), 9.0f, juce::Font::bold));
+    g.drawText ("PUNK FISH / ACID HOUSE & TECHNO", fascia, juce::Justification::centred, false);
+    punk::drawScrew (g, { 13.0f, 35.0f });
+    punk::drawScrew (g, { 1187.0f, 35.0f });
+    punk::drawScrew (g, { 13.0f, 928.0f });
+    punk::drawScrew (g, { 1187.0f, 928.0f });
+}
+
 void TB303AcidEditor::resized()
 {
     const float scale = (float) getWidth() / (float) kDesignWidth;
-    panel.setTransform (juce::AffineTransform::scale (scale));
+    // Component transforms also transform mouse coordinates, so the inset surface
+    // and every control keep their real hit areas at all supported window sizes.
+    panel.setTransform (juce::AffineTransform::scale (scale * 0.96f)
+                            .translated (24.0f * scale, 6.0f * scale));
     panel.setBounds (0, 0, kDesignWidth, kDesignHeight);
     proc.apvts.state.setProperty ("uiWidth", getWidth(), nullptr);
 }

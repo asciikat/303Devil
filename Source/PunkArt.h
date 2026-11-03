@@ -8,6 +8,49 @@
 
 namespace punk
 {
+// Shared hardware face for buttons and sequencer pads. The contact face sinks
+// into its socket while pressed; text and hit areas stay in the JUCE component.
+inline void drawKeycap (juce::Graphics& g, juce::Rectangle<float> bounds,
+                        juce::Colour colour, bool pressed, bool illuminated)
+{
+    const auto socket = bounds.reduced (0.5f);
+    g.setColour (juce::Colours::black.withAlpha (0.75f));
+    g.fillRoundedRectangle (socket, 4.0f);
+    const float depth = pressed ? 1.5f : juce::jmin (6.0f, bounds.getHeight() * 0.22f);
+    const auto face = socket.reduced (1.3f).withTrimmedBottom (depth)
+                            .translated (0.0f, pressed ? 1.5f : 0.0f);
+    // The front wall stays visible below the contact face, like a hardware key.
+    g.setGradientFill (juce::ColourGradient (colour.darker (0.35f), face.getBottomLeft(),
+                                            colour.darker (0.8f), socket.getBottomLeft(), false));
+    g.fillRoundedRectangle (face.withBottom (socket.getBottom() - 0.5f), 3.0f);
+    g.setGradientFill (juce::ColourGradient (colour.brighter (pressed ? 0.04f : 0.3f),
+                                            face.getTopLeft(), colour.darker (0.25f),
+                                            face.getBottomRight(), false));
+    g.fillRoundedRectangle (face, 3.0f);
+    g.setColour (juce::Colours::white.withAlpha (pressed ? 0.12f : 0.32f));
+    g.drawRoundedRectangle (face.reduced (0.5f), 3.0f, 0.8f);
+    g.setColour (juce::Colours::black.withAlpha (0.35f));
+    g.drawHorizontalLine (juce::roundToInt (face.getBottom()), face.getX() + 2.0f, face.getRight() - 2.0f);
+    if (illuminated)
+    {
+        g.setColour (colour.brighter (0.5f));
+        g.fillRoundedRectangle (face.reduced (5.0f, 0.0f).withHeight (1.5f)
+                                    .translated (0.0f, 2.0f), 0.75f);
+    }
+}
+
+inline void drawScrew (juce::Graphics& g, juce::Point<float> centre)
+{
+    auto r = juce::Rectangle<float> (7.0f, 7.0f).withCentre (centre);
+    g.setColour (juce::Colours::black.withAlpha (0.8f));
+    g.fillEllipse (r.expanded (1.0f).translated (0.0f, 1.0f));
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xffa5a8ad), r.getTopLeft(),
+                                            juce::Colour (0xff35383d), r.getBottomRight(), false));
+    g.fillEllipse (r);
+    g.setColour (juce::Colours::black.withAlpha (0.9f));
+    g.drawLine (centre.x - 1.8f, centre.y + 1.8f, centre.x + 1.8f, centre.y - 1.8f, 1.2f);
+}
+
 namespace colours
 {
 const juce::Colour acidYellow { 0xfff7e016 };
@@ -17,6 +60,32 @@ const juce::Colour paper      { 0xfff1ece0 };
 const juce::Colour ghostCyan  { 0xff00e5ff };
 const juce::Colour ink        { 0xff0b0b0d };
 } // namespace colours
+
+// Original printed fish stencil; its eye can report live accent activity.
+inline void drawFish (juce::Graphics& g, juce::Rectangle<float> box, juce::Colour ink, float accent)
+{
+    juce::Graphics::ScopedSaveState save (g);
+    const float scale = juce::jmin (box.getWidth() / 70.0f, box.getHeight() / 42.0f);
+    g.addTransform (juce::AffineTransform::scale (scale).translated (box.getCentre()));
+    g.setColour (ink);
+    g.drawLine (-23.0f, 0.0f, 20.0f, 0.0f, 2.0f);
+    for (int i = 0; i < 5; ++i)
+    {
+        const float x = -18.0f + (float) i * 6.0f;
+        g.drawLine (x, -14.0f + (float) i, x + 4.0f, 0.0f, 1.7f);
+        g.drawLine (x + 4.0f, 0.0f, x, 14.0f - (float) i, 1.7f);
+        g.drawLine (x, -14.0f + (float) i, x - 4.0f, -19.0f, 1.0f);
+    }
+    juce::Path head;
+    head.startNewSubPath (8.0f, -15.0f); head.lineTo (31.0f, -7.0f);
+    head.lineTo (21.0f, -1.0f); head.lineTo (31.0f, 7.0f); head.lineTo (8.0f, 15.0f);
+    g.strokePath (head, juce::PathStrokeType (2.4f));
+    g.drawLine (-23.0f, 0.0f, -32.0f, -14.0f, 2.0f);
+    g.drawLine (-23.0f, 0.0f, -32.0f, 14.0f, 2.0f);
+    const auto eye = juce::Point<float> (15.0f, -7.0f);
+    g.setColour (colours::neonGreen.withAlpha (0.2f + 0.8f * juce::jlimit (0.0f, 1.0f, accent)));
+    g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (eye));
+}
 
 inline juce::Font font (const juce::String& typeface, float height, int style)
 {

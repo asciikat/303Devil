@@ -130,7 +130,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TB303AcidProcessor::createPa
             .withLabel ("dB")));
 
     // Acid mode
-    layout.add (std::make_unique<AudioParameterBool> (ParameterID { pid::acid, 1 }, "Acid Mode", false));
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { pid::acid, 1 }, "Acid Mode", true));
     addPercent (pid::overdrive, "Overdrive",      0.30f);
     addPercent (pid::filterFM,  "Filter FM",      0.0f);
     addPercent (pid::tracking,  "Filter Tracking", 0.0f);
@@ -288,7 +288,14 @@ void TB303AcidProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     const int numSamples = buffer.getNumSamples();
     buffer.clear();
 
-    engine.setParams (readParams());
+    auto live = readParams();
+    if (throwHeld.load (std::memory_order_relaxed))
+    {
+        live.fx.delayMix = std::max (live.fx.delayMix, 0.65);
+        live.fx.delayFeedback = std::max (live.fx.delayFeedback, 0.62);
+    }
+    live.performanceFill = fillHeld.load (std::memory_order_relaxed);
+    engine.setParams (live);
 
     acid::Transport transport;
     if (auto* ph = getPlayHead())
@@ -305,6 +312,13 @@ void TB303AcidProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
             }
         }
     }
+    // Tell hosts about echo/reverb decay, including a released momentary throw.
+    // The delay buffer is four seconds; -60 dB plus a conservative reverb tail.
+    const double tempo = transport.bpm > 0.0 ? transport.bpm : live.bpm;
+    const double seconds = std::min (4.0, live.fx.delayBeats * 60.0 / std::max (20.0, tempo));
+    const double feedback = std::clamp (std::max (0.62, live.fx.delayFeedback), 0.01, 0.9);
+    tailSeconds.store ((float) (20.0 + seconds * std::ceil (std::log (0.001) / std::log (feedback))),
+                       std::memory_order_relaxed);
     engine.beginBlock (transport);
 
     // Render up to each MIDI event so notes land on the exact sample
@@ -339,6 +353,7 @@ void TB303AcidProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         buffer.copyFrom (ch, 0, buffer, ch % 2, 0, numSamples);
 
     scope.push (out, numSamples);
+    uiOutputPeak.store (buffer.getMagnitude (0, numSamples), std::memory_order_relaxed);
     uiStep.store (engine.getCurrentStep());
     uiPlayingPattern.store (engine.getPlayingPattern());
     uiGate.store (engine.getVoice().isGateOn());
@@ -353,6 +368,28 @@ void TB303AcidProcessor::patternEdited()
 {
     ++patternVersion;
     updateHostDisplay (juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged (true));
+}
+
+void TB303AcidProcessor::holdPerformance()
+{
+    heldPerformance.clear();
+    for (const auto* id : presets::kSoundParams)
+        heldPerformance.emplace_back (id, apvts.getParameter (id)->getValue());
+    for (const auto* id : { pid::energy, pid::energyArc, pid::ghostAmount, pid::ghostVariation, pid::ghostPerform })
+        heldPerformance.emplace_back (id, apvts.getParameter (id)->getValue());
+}
+
+void TB303AcidProcessor::returnPerformance()
+{
+    setThrowHeld (false);
+    setFillHeld (false);
+    for (const auto& value : heldPerformance)
+        if (auto* param = apvts.getParameter (value.first))
+        {
+            param->beginChangeGesture();
+            param->setValueNotifyingHost (value.second);
+            param->endChangeGesture();
+        }
 }
 
 void TB303AcidProcessor::randomizePattern()
@@ -711,6 +748,9 @@ void TB303AcidProcessor::setStateInformation (const void* data, int sizeInBytes)
     auto xml = getXmlFromBinary (data, sizeInBytes);
     if (xml == nullptr || ! xml->hasTagName (apvts.state.getType()))
         return;
+
+    throwHeld.store (false);
+    fillHeld.store (false);
 
     auto tree = juce::ValueTree::fromXml (*xml);
     if (auto bank = tree.getChildWithName ("PATTERNS"); bank.isValid())

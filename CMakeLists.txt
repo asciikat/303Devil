@@ -26,6 +26,9 @@ if(ACID_BUILD_PLUGIN)
         URL https://github.com/juce-framework/JUCE/archive/refs/tags/8.0.4.tar.gz)
     FetchContent_MakeAvailable(JUCE)
 
+    juce_add_binary_data(PunkFishArtwork HEADER_NAME PunkFishAssets.h NAMESPACE PunkFishAssets
+        SOURCES assets/knob_lime.png assets/knob_pink.png assets/knob_black.png assets/orange_metal.png)
+
     # On Windows the VST3 folder needs admin rights, so the build leaves the plugin in
     # build/TB303_DevilAcid_artefacts/Release/VST3 for you to copy instead
     if(WIN32)
@@ -36,7 +39,7 @@ if(ACID_BUILD_PLUGIN)
 
     juce_add_plugin(TB303_DevilAcid
         COMPANY_NAME "DevilAcidAudio"
-        BUNDLE_ID com.devilacidaudio.tb303devilacid
+        BUNDLE_ID com.devilacidaudio.punkfish
         IS_SYNTH TRUE
         NEEDS_MIDI_INPUT TRUE
         NEEDS_MIDI_OUTPUT FALSE
@@ -44,10 +47,10 @@ if(ACID_BUILD_PLUGIN)
         EDITOR_WANTS_KEYBOARD_FOCUS FALSE
         COPY_PLUGIN_AFTER_BUILD ${ACID_COPY_AFTER_BUILD}   # Linux: installs the VST3 into ~/.vst3
         PLUGIN_MANUFACTURER_CODE Dvac
-        PLUGIN_CODE T303
+        PLUGIN_CODE PnFk
         VST3_CATEGORIES Instrument Synth
         FORMATS VST3 Standalone
-        PRODUCT_NAME "TB-303 Devil Acid Rig")
+        PRODUCT_NAME "Punk Fish")
 
     target_sources(TB303_DevilAcid PRIVATE
         Source/PluginProcessor.cpp
@@ -70,14 +73,16 @@ if(ACID_BUILD_PLUGIN)
     target_compile_definitions(acid_snapshot PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
-        JucePlugin_Name="TB-303 Devil Acid Rig")
+        JucePlugin_Name="Punk Fish")
     target_link_libraries(acid_snapshot PRIVATE
+        PunkFishArtwork
         juce::juce_audio_utils
         juce::juce_recommended_config_flags)
 
     # No LTO: link-time optimisation needs more RAM than this machine has spare.
     target_link_libraries(TB303_DevilAcid
         PRIVATE
+            PunkFishArtwork
             juce::juce_audio_utils
         PUBLIC
             juce::juce_recommended_config_flags

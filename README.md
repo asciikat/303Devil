@@ -1,3 +1,14 @@
+# Punk Fish — acid house & techno
+
+This branch builds **Punk Fish**, a separate VST3 and standalone instrument with
+an orange hardware interface, rendered 3D knobs, a Service panel, and live
+Throw / Fill / Hold / Return controls. See [build and play](docs/PUNK_FISH_BUILD.md)
+for Windows/Linux builds, installation and the exact implemented feature set.
+
+The original project documentation follows for the underlying voice and sequencer.
+
+---
+
 # TB-303 Devil Acid Rig (VST3)
 
 A 303-style bass synth with a 16-step sequencer and an Acid Mode (Devil Fish style mods + drive).

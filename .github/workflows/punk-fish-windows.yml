@@ -1,0 +1,37 @@
+name: Punk Fish Windows
+on:
+  workflow_dispatch:
+  push:
+    branches: [punk-fish]
+  pull_request:
+    branches: [punk-fish]
+permissions:
+  contents: read
+jobs:
+  windows-vst3:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and check Windows x64
+        shell: pwsh
+        run: ./tools/build-windows.ps1
+      - name: Test VST3 in Windows REAPER
+        shell: pwsh
+        run: ./tools/test-reaper-windows.ps1
+      - name: Upload REAPER evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Punk-Fish-REAPER-evidence
+          path: |
+            build-windows/reaper-test/*.txt
+            build-windows/reaper-test/*.json
+            build-windows/reaper-test/*.png
+            build-windows/reaper-test/*.wav
+            build-windows/reaper-test/*.rpp
+            build-windows/snapshot.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Punk-Fish-Windows-x64
+          path: build-windows/Punk-Fish-Windows-x64.zip
