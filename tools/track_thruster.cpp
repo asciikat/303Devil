@@ -1,4 +1,9 @@
-// "Thruster" - a full-length mid-90s style acid/tribal techno track rendered offline.
+// "Thruster" - a full-length mid-90s style acid techno track rendered offline.
+//
+// v2 "Detroit tension" pass: string-machine pad through an ensemble chorus playing a minor
+// progression (Dm9 - Bbmaj7 - Gm9 - A7b9) over the 303's D pedal, so the A7b9 rubs against
+// the bass every 8 bars and hangs for 4 bars before the drop. Noise risers and dead stops
+// before each drop, straight 16th 909 hats, tribal parts pulled back, 138 BPM.
 //
 // Inspired by the Peacefrog-era Planetary Assault Systems sound (driving 909-style kick,
 // loopy tribal toms and congas, one relentless acid line), but written from scratch:
@@ -28,7 +33,7 @@
 namespace
 {
 constexpr int    kFs     = 44100;
-constexpr double kBpm    = 136.0;
+constexpr double kBpm    = 138.0;
 constexpr int    kBars   = 152;
 constexpr double kSwing  = 0.54;   // drums and 303 share this
 constexpr double kTwoPi  = 6.283185307179586;
@@ -262,6 +267,88 @@ Buf makeStab()
     return b;
 }
 
+// Detroit string machine: three detuned saws per note, slow attack, lowpassed.
+// The ensemble chorus is added later on the whole pad bus.
+void addChord (Stereo& out, const std::vector<int>& notes, double at, double lenSamples, double gain, double cutoffHz)
+{
+    const double attack = 0.3 * kFs, release = 1.0 * kFs;
+    const size_t n = (size_t) (lenSamples + release);
+    const size_t start = (size_t) std::lround (at);
+    for (size_t vi = 0; vi < notes.size(); ++vi)
+    {
+        double ph[3] = { 0.13 * vi, 0.37 + 0.11 * vi, 0.71 + 0.05 * vi };
+        const double det[3] = { -0.11, 0.0, 0.12 };
+        Svf lp; lp.set (cutoffHz, 0.75);
+        const double pan = notes.size() > 1 ? (double) vi / (notes.size() - 1) * 1.2 - 0.6 : 0.0;
+        const double gl = std::cos ((pan + 1.0) * M_PI * 0.25) * 1.414, gr = std::sin ((pan + 1.0) * M_PI * 0.25) * 1.414;
+        double f[3];
+        for (int k = 0; k < 3; ++k) f[k] = 440.0 * std::pow (2.0, (notes[vi] + det[k] - 69.0) / 12.0);
+        for (size_t i = 0; i < n && start + i < out.l.size(); ++i)
+        {
+            double env = i < attack ? i / attack : 1.0;
+            if (i > lenSamples) env *= std::exp (-(i - lenSamples) / (0.3 * kFs));
+            double sum = 0;
+            for (int k = 0; k < 3; ++k) { ph[k] = std::fmod (ph[k] + f[k] / kFs, 1.0); sum += 2.0 * ph[k] - 1.0; }
+            double lo, band, hi;
+            lp.tick (sum / 3.0, lo, band, hi);
+            const double y = lo * env * gain;
+            out.l[start + i] += (float) (y * gl);
+            out.r[start + i] += (float) (y * gr);
+        }
+    }
+}
+
+// String-ensemble chorus: three taps on slow + fast modulated delays
+void ensemble (Stereo& s)
+{
+    const size_t n = s.l.size();
+    Buf mono (n);
+    for (size_t i = 0; i < n; ++i) mono[i] = 0.5f * (s.l[i] + s.r[i]);
+    auto read = [&] (double idx) {
+        if (idx < 0) return 0.0;
+        const size_t a = (size_t) idx; const double fr = idx - a;
+        return a + 1 < n ? mono[a] * (1 - fr) + mono[a + 1] * fr : 0.0;
+    };
+    for (size_t i = 0; i < n; ++i)
+    {
+        const double t = (double) i / kFs;
+        double tap[3];
+        for (int k = 0; k < 3; ++k)
+        {
+            const double d = 0.012 + 0.004 * std::sin (kTwoPi * 0.63 * t + k * 2.094) + 0.0006 * std::sin (kTwoPi * 6.1 * t + k * 2.094);
+            tap[k] = read (i - d * kFs);
+        }
+        s.l[i] = (float) (0.4 * s.l[i] + 0.6 * (0.8 * tap[0] + 0.4 * tap[1]));
+        s.r[i] = (float) (0.4 * s.r[i] + 0.6 * (0.8 * tap[2] + 0.4 * tap[1]));
+    }
+}
+
+// Noise riser: resonant band sweeping up, growing, chopped into 16ths at the very end
+void addRiser (Stereo& out, double from, double to, double gain)
+{
+    rng.seed (55);
+    Svf bp;
+    double ph = 0;
+    const size_t a = (size_t) from, b = std::min ((size_t) to, out.l.size());
+    for (size_t i = a; i < b; ++i)
+    {
+        const double x = (double) (i - a) / (b - a);
+        bp.set (250.0 * std::pow (36.0, x), 2.5);
+        double lo, band, hi;
+        bp.tick (noise(), lo, band, hi);
+        ph += kTwoPi * (90.0 + 900.0 * x * x) / kFs;
+        double y = (band + 0.25 * std::sin (ph)) * std::pow (x, 2.2) * gain;
+        if (x > 0.75)
+        {
+            const double sixteenth = std::fmod ((double) i / (kSamplesPerBeat * 0.25), 1.0);
+            y *= sixteenth < 0.55 ? 1.0 : 0.0;
+        }
+        const double pan = 0.6 * std::sin (kTwoPi * x * 6.0);
+        out.l[i] += (float) (y * (1.0 - pan));
+        out.r[i] += (float) (y * (1.0 + pan));
+    }
+}
+
 void addHit (Stereo& out, const Buf& s, double at, double gain, double pan)
 {
     const size_t start = (size_t) std::lround (at);
@@ -331,7 +418,7 @@ int main (int argc, char** argv)
 
     //--------------------------------------------------------------------------
     // Drums and percussion
-    Stereo drums (total), perc (total), stabBus (total);
+    Stereo drums (total), perc (total), stabBus (total), padBus (total), riserBus (total);
 
     const Buf kick = makeKick(), clap = makeClap(), snare = makeSnare(), ride_ = makeRide();
     const Buf rim = makeRim(), shaker = makeShaker(), stab = makeStab();
@@ -344,6 +431,7 @@ int main (int argc, char** argv)
     const char* kickP  = "X...X...X...X...";
     const char* kickFill = "X...X...X...X.x.";
     const char* chP    = "x.xXx.xXx.xXx.xX";
+    const char* chP16  = "xxXxxxXxxxXxxxXx";   // Detroit: straight 16ths, accent on the "and"
     const char* ohP    = "..x...x...x...x.";
     const char* clapP  = "....X.......X...";
     const char* rideP  = "x.x.x.x.x.x.x.x.";
@@ -366,7 +454,7 @@ int main (int argc, char** argv)
         const bool clapOn   = in (bar, 16, 72) || in (bar, 88, 136);
         const bool rideOn   = in (bar, 48, 64) || in (bar, 96, 128);
         const bool tomOn    = in (bar, 8, 140);
-        const bool congaOn  = in (bar, 32, 72) || in (bar, 76, 136);
+        const bool congaOn  = in (bar, 32, 64);
         const bool rimOn    = in (bar, 40, 64) || in (bar, 104, 128);
         const bool shkOn    = in (bar, 12, 140);
         const bool rollOn   = in (bar, 84, 88);
@@ -381,8 +469,9 @@ int main (int argc, char** argv)
                 addHit (drums, kick, t, 0.72 * vel (phraseEnd ? kickFill : kickP, s), 0.0);
                 kickTimes.push_back (t);
             }
-            if (hatOn && hit (chP, s))
-                addHit (drums, ch[abs % 3], t, 0.3 * vel (chP, s), 0.15);
+            const char* hp = bar >= 40 ? chP16 : chP;
+            if (hatOn && hit (hp, s))
+                addHit (drums, ch[abs % 3], t, 0.3 * vel (hp, s) * (hp[s] == 'X' ? 1.0 : 0.8), 0.15);
             if (ohOn && hit (ohP, s))
                 addHit (drums, oh, t, 0.2, -0.1);
             if (clapOn && hit (clapP, s))
@@ -422,6 +511,32 @@ int main (int argc, char** argv)
             }
         }
     }
+
+    // Detroit strings: Dm9 - Bbmaj7 - Gm9 - A7b9, two bars each, over the D pedal.
+    // Bars 84-88 hang on the A7b9 for maximum pull into the drop.
+    {
+        const std::vector<int> chords[4] = { { 50, 53, 57, 60, 64 }, { 46, 50, 53, 57, 62 },
+                                             { 43, 50, 53, 57, 58 }, { 45, 49, 52, 55, 58 } };
+        for (int bar = 32; bar < 136; bar += 2)
+        {
+            const bool hang = bar == 84;
+            const int c = hang ? 3 : (bar / 2) % 4;
+            const double len = (hang ? 4 : 2) * barSamples;
+            const double g = ride (bar, { { 32, 0.05 }, { 62, 0.11 }, { 64, 0.2 }, { 86, 0.24 }, { 88, 0.12 },
+                                          { 120, 0.13 }, { 134, 0.04 } });
+            const double cut = ride (bar, { { 32, 500 }, { 62, 1300 }, { 64, 900 }, { 84, 2600 }, { 88, 2200 },
+                                            { 120, 1900 }, { 134, 600 } });
+            addChord (padBus, chords[c], stepTime ((int64_t) bar * 16), len, g, cut);
+            if (hang) bar += 2;
+        }
+        ensemble (padBus);
+    }
+
+    // Risers into each section change
+    addRiser (riserBus, stepTime (28 * 16), stepTime (32 * 16) - 0.5 * kSamplesPerBeat, 0.35);
+    addRiser (riserBus, stepTime (56 * 16), stepTime (64 * 16), 0.4);
+    addRiser (riserBus, stepTime (80 * 16), stepTime (88 * 16) - 0.5 * kSamplesPerBeat, 0.6);
+    addRiser (riserBus, stepTime (112 * 16), stepTime (120 * 16), 0.4);
 
     // Chord stab: the dubbed-out break, plus a few calls in the second peak
     for (int bar = 64; bar < 88; ++bar)
@@ -548,6 +663,7 @@ int main (int argc, char** argv)
         acid::PingPongDelay dly; dly.prepare (kFs);
         acid::Reverb verb; verb.prepare (kFs);
         acid::Reverb room; room.prepare (kFs);
+        acid::Reverb padVerb; padVerb.prepare (kFs);
         const double d = 0.75 * kSamplesPerBeat;
         for (size_t i = 0; i < total; ++i)
         {
@@ -557,6 +673,11 @@ int main (int argc, char** argv)
             verb.process (sIn * 0.6f + 0.4f * (dl + dr), 0.85, rl, rr);
             stabBus.l[i] += 0.8f * dl + 0.7f * rl;
             stabBus.r[i] += 0.8f * dr + 0.7f * rr;
+
+            float vl, vr;
+            padVerb.process (0.5f * (padBus.l[i] + padBus.r[i]) * 0.5f, 0.9, vl, vr);
+            padBus.l[i] += vl;
+            padBus.r[i] += vr;
 
             float pl, pr;
             room.process (0.5f * (perc.l[i] + perc.r[i]) * 0.25f, 0.35, pl, pr);
@@ -583,8 +704,8 @@ int main (int argc, char** argv)
     {
         const size_t a = (size_t) (96 * barSamples), b = (size_t) (104 * barSamples);
         auto rms = [&] (const Stereo& st) { double q = 0; for (size_t i = a; i < b; ++i) q += st.l[i] * st.l[i]; return 20 * std::log10 (std::sqrt (q / (b - a)) + 1e-9); };
-        std::printf ("bus RMS (bars 96-104): drums %.1f  perc %.1f  acid %.1f  counter %.1f  stab %.1f dB\n",
-                     rms (drums), rms (perc), rms (acidBus), rms (counterBus), rms (stabBus));
+        std::printf ("bus RMS (bars 96-104): drums %.1f  perc %.1f  acid %.1f  counter %.1f  stab %.1f  pad %.1f dB\n",
+                     rms (drums), rms (perc), rms (acidBus), rms (counterBus), rms (stabBus), rms (padBus));
     }
 
     Stereo mix (total);
@@ -593,10 +714,15 @@ int main (int argc, char** argv)
     for (size_t i = 0; i < total; ++i)
     {
         const double dk = duck[i];
-        const double music_l = 1.1 * acidBus.l[i] + 0.9 * counterBus.l[i] + 0.7 * stabBus.l[i] + 1.1 * perc.l[i];
-        const double music_r = 1.1 * acidBus.r[i] + 0.9 * counterBus.r[i] + 0.7 * stabBus.r[i] + 1.1 * perc.r[i];
+        const double music_l = 1.1 * acidBus.l[i] + 0.9 * counterBus.l[i] + 0.7 * stabBus.l[i] + 0.9 * perc.l[i] + padBus.l[i] + riserBus.l[i];
+        const double music_r = 1.1 * acidBus.r[i] + 0.9 * counterBus.r[i] + 0.7 * stabBus.r[i] + 0.9 * perc.r[i] + padBus.r[i] + riserBus.r[i];
         double l = drums.l[i] * 0.85 + music_l * dk;
         double r = drums.r[i] * 0.85 + music_r * dk;
+
+        // Dead stops: everything cut for the last half beat before bar 32 and the drop
+        const double beatPos = i / kSamplesPerBeat;
+        if ((beatPos >= 32 * 4 - 0.5 && beatPos < 32 * 4) || (beatPos >= 88 * 4 - 0.5 && beatPos < 88 * 4))
+            l = r = 0.0;
 
         // Console-style saturation, gentle
         l = std::tanh (l * 1.15) / std::tanh (1.15);
