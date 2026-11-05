@@ -27,6 +27,15 @@ Quick DSP test without JUCE (writes WAVs to `renders/`):
 g++ -std=c++17 -O2 -I Source tools/render_test.cpp -o acid_render && ./acid_render renders
 ```
 
+Full demo track, "Thruster" (mid-90s acid/tribal techno, 136 BPM, 4:28, two 303s + synthesised
+drums and percussion, writes a stereo WAV):
+
+```bash
+g++ -std=c++17 -O2 -I Source tools/track_thruster.cpp -o thruster && ./thruster renders/thruster.wav
+```
+
+A 256 kbps MP3 of it is in `renders/15_thruster_full_track.mp3`.
+
 ## Layout
 
 | Path | What |
