@@ -38,6 +38,16 @@ g++ -std=c++17 -O2 -I Source tools/track_thruster.cpp -o thruster && ./thruster 
 Renders: `renders/17_thruster_minimal_groove.mp3` (current), `renders/16_thruster_detroit_tension.mp3`
 and `renders/15_thruster_full_track.mp3` (earlier versions).
 
+Second demo track, "Woodward Nights" (80s Detroit warehouse style, no 303: 126 BPM, 4:34,
+shuffled 808/909-style kit with cowbell, a deep hypnotic synth bass, string-machine and
+Juno-style PWM pads, a poly stab riff and an FM bell hook). Shares `tools/synth_kit.h` with Thruster:
+
+```bash
+g++ -std=c++17 -O2 -I Source tools/track_woodward.cpp -o woodward && ./woodward renders/woodward.wav
+```
+
+Render: `renders/18_woodward_nights.mp3`.
+
 ## Layout
 
 | Path | What |
@@ -52,6 +62,7 @@ and `renders/15_thruster_full_track.mp3` (earlier versions).
 | `Source/PluginProcessor.*` | Parameters, host sync, state saving |
 | `Source/PluginEditor.*` | GUI: knobs, step grid, scope. The window is resizable (50%-200%, drag the bottom-right corner); everything scales and the size is saved with the session |
 | `tools/render_test.cpp` | Offline checks + WAV renders |
+| `tools/synth_kit.h`, `tools/track_*.cpp` | Shared synth kit and the two full demo tracks |
 
 ## How it behaves
 
